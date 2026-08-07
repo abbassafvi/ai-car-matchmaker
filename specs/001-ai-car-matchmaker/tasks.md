@@ -258,6 +258,34 @@ where the pre-M2.5 code produced zero.
 **Independent Test**: Per spec.md US2 — seeded interview state, verify hard
 filters + reasoning + exact-value A2UI rendering.
 
+### 🔴 Open decision before starting (unanswered)
+
+T021 and T029 are **behavioral** tests needing many live LLM calls, and the
+Gemini free tier allows ~20 requests/day/model. T029 is the one that actually
+proves Principle IV. Three options were put to the user, who deferred:
+
+1. Build M3 now, write T021/T029 to auto-skip until a billed key exists.
+2. User provides a billed key first; exercise both live throughout.
+3. Scripted fake model for the behavioral tests + a thin live smoke test.
+
+**Resolve this before writing M3 code.**
+
+### What M2.5 already did for M3
+
+- The phase gate already **names** `search_listings` / `get_listing_details`
+  for `Phase.RESEARCHING` and `select_listing` for `RESULTS_READY`
+  (`TOOLS_BY_PHASE` in `agent/state.py`). T025 only has to **register the
+  real tool objects in `TOOL_REGISTRY`** (`agent/graph.py`) — the gate and
+  its tests already exist and will start covering them automatically.
+- `PHASE_SYSTEM_PROMPTS` already has RESEARCHING/RESULTS_READY prompts
+  carrying `UNTRUSTED_DATA_RULE` (Principle IV delimiters), asserted by
+  `test_phase_gate.py`. T029 supplies the *behavioral* proof.
+- **Re-check the accepted deviation** recorded in Phase 3.5: DeepAgents binds
+  9 built-in tools (incl. `write_file`, `execute`, `task`) in every phase,
+  outside our gate. Inert today because the default `StateBackend` is virtual
+  and has no `execute`. M3 is when untrusted listing text first reaches the
+  model, so re-evaluate whether those need constraining.
+
 ### Tests for User Story 2
 
 - [ ] T020 [P] [US2] Unit test: `search_listings` hard filters (category,

@@ -47,18 +47,31 @@ RENTAL_SOURCES = [
     "Hertz — Rental", "Zipcar — Rental",
 ]
 
-# Category -> (min_price, max_price, seats, price band for rent/day)
+# Category -> (min_price, max_price, seats)
+#
+# Floors represent used/higher-mileage inventory, ceilings new-and-loaded.
+# The original floors were all new-car prices, which made spec.md's US2 AS1
+# ("budget $25,000, category SUV, transaction_type buy") match **zero**
+# listings -- the cheapest SUV was $26,380 and the only sub-$30k SUVs were
+# rent-only. A dataset that cannot satisfy the spec's own headline
+# acceptance scenario sends every demo straight into the zero-result
+# relaxation path, so the floors were lowered to give each category a
+# genuine budget tier. Ceilings are unchanged.
+#
+# Widening the bands also makes price correlate with year/mileage below,
+# which the flat bands did not: a 2022 car with 55k miles now actually
+# costs less than its 2026 equivalent.
 CATEGORY_PROFILE = {
-    "Sedan":       (18_000, 38_000, 5),
-    "SUV":         (26_000, 58_000, 5),
-    "Truck":       (30_000, 65_000, 5),
-    "Minivan":     (28_000, 45_000, 7),
-    "Coupe":       (24_000, 55_000, 4),
-    "Convertible": (30_000, 70_000, 4),
-    "Hatchback":   (16_000, 30_000, 5),
-    "Electric":    (32_000, 75_000, 5),
-    "Luxury":      (55_000, 120_000, 5),
-    "Sports":      (60_000, 180_000, 2),
+    "Sedan":       (9_000, 38_000, 5),
+    "SUV":         (12_000, 58_000, 5),
+    "Truck":       (14_000, 65_000, 5),
+    "Minivan":     (11_000, 45_000, 7),
+    "Coupe":       (11_000, 55_000, 4),
+    "Convertible": (14_000, 70_000, 4),
+    "Hatchback":   (7_000, 30_000, 5),
+    "Electric":    (15_000, 75_000, 5),
+    "Luxury":      (22_000, 120_000, 5),
+    "Sports":      (28_000, 180_000, 2),
 }
 
 SEED = 20260807  # deterministic; change only if a fresh dataset is intended
@@ -157,8 +170,20 @@ def generate(seed: int = SEED) -> list[dict]:
             trim = rng.choice(TRIMS)
             model_name = f"{category} {trim}"
             year = rng.randint(2022, 2026)
-            price = rng.randint(min_price, max_price)
             mileage = 0 if year == 2026 else rng.randint(500, 60_000)
+
+            # Price is derived from age and mileage rather than drawn
+            # independently, so a 2022 car with 55k miles is actually
+            # cheaper than its 2026 equivalent. Previously price was
+            # uniform-random and uncorrelated, which produced obvious
+            # nonsense (a pristine 2026 listing priced below a worn 2022
+            # one) and gave the ranking layer no real signal to explain.
+            wear = 0.65 * ((2026 - year) / 4) + 0.35 * (mileage / 60_000)
+            base = max_price - (max_price - min_price) * wear
+            # Trim/options/condition jitter, so identical age+mileage pairs
+            # don't collapse onto one price.
+            price = int(round(base * rng.uniform(0.92, 1.08)))
+            price = max(min_price, min(max_price, price))
             fuel_type = "Electric" if category == "Electric" else rng.choice(FUEL_TYPES)
             location = rng.choice(CITIES)
 

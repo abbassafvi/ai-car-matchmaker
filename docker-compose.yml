@@ -15,16 +15,29 @@ services:
         required: false
     environment:
       - PHOENIX_COLLECTOR_ENDPOINT=http://phoenix:4317
+      - MCP_MARKETPLACE_URL=http://mcp-services:8100/mcp
     volumes:
       - agent-backend-data:/app/data
     depends_on:
-      - mcp-services
-      - phoenix
+      # service_healthy, not the bare list form: the bare form only waits
+      # for the container to *start*, so the agent could open its MCP
+      # session against a server that has not bound its port yet.
+      mcp-services:
+        condition: service_healthy
+      phoenix:
+        condition: service_started
 
   mcp-services:
     build: ./mcp-services
     ports:
       - "8100:8100"
+    healthcheck:
+      test: ["CMD", "python", "-c",
+             "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8100/health', timeout=2).status==200 else 1)"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 5s
 
   phoenix:
     image: arizephoenix/phoenix:latest

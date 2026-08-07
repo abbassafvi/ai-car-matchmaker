@@ -288,8 +288,22 @@ proves Principle IV. Three options were put to the user, who deferred:
 
 ### Tests for User Story 2
 
-- [ ] T020 [P] [US2] Unit test: `search_listings` hard filters (category,
+- [x] T020 [P] [US2] Unit test: `search_listings` hard filters (category,
       budget, transaction_type, availability) — `mcp-services/tests/test_marketplace.py`
+      (18 tests) plus `tests/test_marketplace_server.py` (9 tests) for the
+      MCP tool contract. **Dataset finding**: the first version of these
+      tests failed against real data, and the code was right — spec.md US2
+      AS1 ("budget $25,000, category SUV, transaction_type buy") matched
+      **zero** listings, because every `CATEGORY_PROFILE` floor was a
+      new-car price (cheapest SUV $26,380, and the only sub-$30k SUVs were
+      rent-only). A dataset that cannot satisfy the spec's own headline
+      acceptance scenario would have sent every demo into the zero-result
+      relaxation path. Floors lowered to give each category a used/budget
+      tier, and price is now derived from age + mileage rather than drawn
+      independently (previously a pristine 2026 listing could be priced
+      below a worn 2022 one, which gave the ranking layer nothing real to
+      explain). Ceilings, seed, counts and the 3 `ADV-*` probes unchanged;
+      AS1 now matches 4 listings.
 - [ ] T021 [P] [US2] Integration test: zero-match query triggers constraint
       relaxation messaging, not fabricated results — `agent-backend/tests/test_research.py`
 - [ ] T022 [P] [US2] Snapshot test: A2UI catalogue JSON values equal source
@@ -297,8 +311,26 @@ proves Principle IV. Three options were put to the user, who deferred:
 
 ### Implementation for User Story 2
 
-- [ ] T023 [US2] `mcp-services/marketplace/`: MCP server exposing
-      `search_listings`, `get_listing_details` over Streamable HTTP
+- [x] T023 [US2] `mcp-services/marketplace/`: MCP server exposing
+      `search_listings`, `get_listing_details` over Streamable HTTP.
+      `store.py` holds the query logic (testable without a transport),
+      `server.py` is the thin FastMCP layer; `app_stub.py` deleted, the
+      `/health` route carried over so compose/README keep working.
+      Verified in Docker: image builds, container reports healthy, and
+      `POST /mcp` answers the protocol.
+      **Two contract findings worth keeping:**
+      (a) FastMCP puts a *dict* return at the top level of
+      `structured_content` but a *list* return under a `"result"` key, so
+      returning records bare would make the Principle I grounding channel's
+      shape depend on which tool was called. Both tools now return a named
+      object (`listings`/`count`/`query`, and `listing`), pinned by
+      `test_marketplace_server.py`.
+      (b) Principle IV's boundary is now real rather than declared: the
+      server wraps each `description` in `<untrusted_listing_data>` before
+      it leaves, because tool output is what langchain-mcp-adapters
+      serialises into the model's context — the agent side never gets a
+      chance to wrap it later. Confirmed live that the `ADV-0001` payload
+      arrives *inside* the delimiters.
 - [ ] T024 [US2] `agent-backend`: `langchain-mcp-adapters` wiring — verify
       current API against plan.md's flagged NEEDS VERIFICATION item, adjust
       integration code accordingly

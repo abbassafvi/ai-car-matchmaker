@@ -22,6 +22,29 @@ class Phase(str, Enum):
     CONFIRMED = "CONFIRMED"
 
 
+# The phase gate itself (Constitution Principle II). Module-level rather
+# than a SessionState method so agent/graph.py can bind tools for a phase
+# without needing a session instance -- this table is the single source of
+# truth for which tools the model is even allowed to see, and graph.py
+# builds its per-phase agents directly from it.
+TOOLS_BY_PHASE: dict["Phase", list[str]] = {
+    Phase.INTERVIEWING: ["save_interview_state"],
+    Phase.RESEARCHING: ["search_listings", "get_listing_details"],
+    Phase.RESULTS_READY: ["search_listings", "get_listing_details", "select_listing"],
+    Phase.FORM_FILLING: ["open_booking_form", "submit_booking"],
+    Phase.AWAITING_PAYMENT: ["open_mock_checkout", "confirm_mock_payment"],
+    Phase.CONFIRMED: [],
+}
+
+
+def tool_names_for_phase(phase: "Phase") -> list[str]:
+    """Tool names permitted in `phase`. Transactional tools are simply
+    absent outside their phase, so the model cannot call them -- the gate
+    is enforced by what gets bound, not by asking the model nicely.
+    """
+    return list(TOOLS_BY_PHASE[phase])
+
+
 class TransactionType(str, Enum):
     BUY = "buy"
     RENT = "rent"
@@ -92,15 +115,10 @@ class SessionState(BaseModel):
 
     def available_tools(self) -> list[str]:
         """Explicit phase gate (Constitution Principle II): the tool names
-        exposed to the model for the current phase. Enforced here, in code,
-        not left to prompting.
+        exposed to the model for this session's current phase.
+
+        Delegates to the module-level table so there is exactly one gate
+        definition -- agent/graph.py binds real tool objects from that same
+        table when constructing each phase's agent.
         """
-        by_phase = {
-            Phase.INTERVIEWING: ["save_interview_state"],
-            Phase.RESEARCHING: ["search_listings", "get_listing_details"],
-            Phase.RESULTS_READY: ["search_listings", "get_listing_details", "select_listing"],
-            Phase.FORM_FILLING: ["open_booking_form", "submit_booking"],
-            Phase.AWAITING_PAYMENT: ["open_mock_checkout", "confirm_mock_payment"],
-            Phase.CONFIRMED: [],
-        }
-        return by_phase[self.phase]
+        return tool_names_for_phase(self.phase)

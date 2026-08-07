@@ -97,7 +97,7 @@ one contradiction, verify persisted state + A2UI progress surface.
 - [x] T013 [P] [US1] Integration test: phase auto-transitions
       INTERVIEWING → RESEARCHING only once all 5 slots are non-null —
       `agent-backend/tests/test_interview_agent.py`, live LLM call,
-      auto-skips without `OPENROUTER_API_KEY`
+      auto-skips without `LLM_API_KEY` (renamed from `OPENROUTER_API_KEY` in M2.5)
 
 ### Implementation for User Story 1
 
@@ -162,7 +162,88 @@ both success and graceful-failure paths, real Docker Compose build
 deps) with secrets verified absent from both the built JS bundle and the
 image layers. 23 automated tests total across `agent-backend` (19
 unconditional + 4 live-LLM/Phoenix-gated, auto-skip cleanly without
-credentials/Phoenix running — verified with `env -u OPENROUTER_API_KEY`).
+credentials/Phoenix running — verified with `env -u LLM_API_KEY`).
+
+---
+
+## Phase 3.5: Audit Remediation — M2.5
+
+**Why this phase exists**: a pre-M3 audit (fresh clone, fresh venv, fresh
+Docker build, live stack, live WebSocket session) found that two
+Constitution principles were recorded as PASS in plan.md while having **no
+production code path at all**. Fixing them before M3 was mandatory: both
+get materially more expensive once M3 adds a second tool and untrusted
+listing text.
+
+- [x] T051 **F1 — Observability was dead code.** `setup_observability()`
+      had zero callers outside its own test; a full live session against
+      the compose stack produced **zero spans** in a running Phoenix
+      (`/v1/projects` returned only `default`, with an empty span list).
+      FR-012 and Principle V were unmet. Now called from the FastAPI
+      lifespan *before* any agent is constructed (auto-instrument patches
+      LangChain globally, so ordering matters), and fail-soft so an
+      unreachable Phoenix degrades tracing instead of taking the app down.
+      `agent-backend/tests/test_observability_wiring.py`
+- [x] T052 **F2 — The phase gate was never enforced.**
+      `SessionState.available_tools()` had zero production callers;
+      `build_interview_agent()` hardcoded its tool list. The gate is now a
+      single module-level table (`TOOLS_BY_PHASE` in `agent/state.py`) that
+      `agent/graph.py` builds one agent per phase from, via
+      `PhaseAgentRegistry`. DeepAgents fixes an agent's tools at
+      construction, so one-agent-per-phase is what makes the gate real.
+      `agent-backend/tests/test_phase_gate.py`
+- [x] T053 **F4 — `agent.invoke()` blocked the event loop.** It ran inline
+      in an `async def` WebSocket handler, serializing every concurrent
+      session behind each LLM round trip (spec.md US5 AS2 requires two
+      simultaneous sessions). Now dispatched via `asyncio.to_thread`.
+- [x] T054 **F7 — Backend died at startup without an API key.**
+      `build_model()` raised inside lifespan, so `docker compose up` before
+      creating `.env` killed the service. The app now boots degraded:
+      `/health` reports `status: degraded`, and a chat turn returns a
+      readable error naming the missing variable.
+- [x] T055 **F5 — Frontend Docker build ignored the lockfile.**
+      `COPY package.json` + `npm install` re-resolved caret ranges at build
+      time, so a rebuild could silently pull a different `@a2ui/react` than
+      the one verified to work. Now `COPY package.json package-lock.json`
+      + `npm ci`.
+- [x] T056 **F6 — No guard that `listings.json` matched the generator.**
+      Every dataset test called `generate()` in process, but M3's MCP
+      server reads the committed file. Drift would have been invisible.
+      `mcp-services/tests/test_generate_listings.py`
+- [x] T057 **F8/F10 — Docs asserted things the code did not do.** plan.md's
+      Constitution Check rows II and V corrected (with the correction
+      recorded, not silently edited); test counts reconciled; dead
+      `agent-backend/app_stub.py` deleted; `mcp-services/.dockerignore`
+      added.
+- [x] T058 **LLM provider swap — OpenRouter → Google Gemini.** OpenRouter
+      credits were exhausted (free tier, ~$0 left: a 20-token probe
+      succeeded but the configured 1024-token calls returned 402), and the
+      live-LLM tests *hard-failed* rather than skipping, because `skipif`
+      only checked for key **presence**. `agent/llm.py` is now
+      provider-selected (`LLM_PROVIDER=google|openai_compatible`).
+      **Finding**: Gemini's OpenAI-compatibility endpoint cannot be used
+      for Gemini 3.x — it drops the `thought_signature` that thinking
+      models attach to function calls, so the second turn of every
+      tool-using conversation fails `400 INVALID_ARGUMENT`. Verified
+      directly; not fixable via `reasoning_effort`. The native client
+      round-trips it correctly.
+- [x] T059 **Content-block normalization.** Gemini returns
+      `AIMessage.content` as a *list of content blocks*, not a string, so
+      the WebSocket handler was about to send a JSON array where the
+      frontend chat bubble expects text. Added `message_text()` at the
+      wire boundary; reasoning/thinking blocks are dropped rather than
+      shown. `agent-backend/tests/test_message_text.py`
+
+**Accepted deviation**: `create_deep_agent` always installs
+`FilesystemMiddleware`, binding nine built-in tools outside our gate. Not
+removable via its public API. Safe because the default `StateBackend` is a
+virtual filesystem in graph state with no `execute` implementation — shell
+execution is inert and the host is untouched. `test_phase_gate.py` pins
+both the built-in set and the absence of `StateBackend.execute` so a
+dependency upgrade that widens the agent's reach fails loudly.
+
+**Checkpoint**: 47 automated tests (39 agent-backend + 8 mcp-services)
+excluding credential/Phoenix-gated ones, up from 30.
 
 ---
 

@@ -11,8 +11,10 @@ Built for the Amulate Summer Hackathon 2026.
 ## Status
 
 M0 (scaffolding) + M1 (foundational) + M2 (conversational interview, User
-Story 1) complete — 23 automated tests, plus live end-to-end verification
-in a real browser against a real Docker Compose build. See
+Story 1) + M2.5 (audit remediation) complete — **47 automated tests**
+(39 `agent-backend` + 8 `mcp-services`, excluding credential- and
+Phoenix-gated ones), plus live end-to-end verification in a real browser
+against a real Docker Compose build. See
 [`specs/001-ai-car-matchmaker/`](specs/001-ai-car-matchmaker/) for the full
 spec-driven-development trail:
 
@@ -35,8 +37,17 @@ frontend (React + Vite)          agent-backend (Python)         mcp-services (Py
 ## Running locally
 
 1. Copy `agent-backend/.env.example` to `agent-backend/.env` and fill in
-   `OPENROUTER_API_KEY` (get one at [openrouter.ai](https://openrouter.ai/)).
+   `LLM_API_KEY` (get a Gemini key at
+   [aistudio.google.com/apikey](https://aistudio.google.com/apikey)).
 2. `docker compose up --build`
+
+Without a key the stack still comes up — `/health` reports
+`status: degraded` and the chat replies with what to configure, rather than
+the backend dying at startup.
+
+> **Quota note**: Gemini's free tier allows roughly **20 requests per day
+> per model**. That covers a smoke test, not a live demo. Use a billed key
+> for anything real, or switch `LLM_MODEL` to spread load.
 
 | Service | URL |
 |---|---|
@@ -63,15 +74,19 @@ pip install -r agent-backend/requirements.txt -r mcp-services/requirements.txt
 
 Two test categories auto-skip without extra setup rather than failing:
 
-- Anything needing a live LLM call skips without `OPENROUTER_API_KEY` set
-  (export it, or `source agent-backend/.env` first, to run them)
+- Anything needing a live LLM call skips without `LLM_API_KEY` set
+  (export it, or `set -a && . agent-backend/.env && set +a` first, to run them)
 - The Phoenix tracing test skips unless Phoenix is running:
   `docker compose up -d phoenix`
+
+Note that the skip is on key *presence*. With a key set but out of
+quota/credit, those tests **fail** rather than skip — that is a real
+failure, but check the provider account before assuming a code bug.
 
 ## Tech stack
 
 - **Agent harness**: [LangChain DeepAgents](https://docs.langchain.com/labs/deep-agents/overview) (LangGraph)
-- **LLM provider**: [OpenRouter](https://openrouter.ai/) (OpenAI-compatible API), model configurable via `OPENROUTER_MODEL` — no code changes to switch models
+- **LLM provider**: [Google Gemini](https://ai.google.dev/) via the native `langchain-google-genai` client (default `gemini-3.6-flash`). `LLM_PROVIDER=openai_compatible` swaps to any OpenAI-compatible API (OpenRouter, NVIDIA NIM) — provider and model are config, not code
 - **Tool protocol**: [MCP](https://modelcontextprotocol.io/) (Python SDK, Streamable HTTP) — M3+
 - **In-chat transactional UI**: [MCP Apps](https://apps.extensions.modelcontextprotocol.io/) — booking form + mock checkout (sandboxed iframes) — M4
 - **Generative UI**: [A2UI](https://a2ui.org/) v0.9 protocol via the real [`@a2ui/react`](https://www.npmjs.com/package/@a2ui/react) renderer — car catalogue + live agent progress/reasoning

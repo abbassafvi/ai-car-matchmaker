@@ -5,7 +5,7 @@ continue this project with zero re-discovery and without repeating mistakes
 already made and fixed. Read this file first, then the files listed in
 [§12 Required reading](#12-required-reading).
 
-**Last updated**: 2026-08-08, after M2 shipped (commit `6cef214`).
+**Last updated**: 2026-08-08, after **M2.5** (audit remediation) shipped.
 
 ---
 
@@ -71,24 +71,30 @@ agreed with the user:**
 
 ---
 
-## 2. Current status: M0, M1, M2 complete
+## 2. Current status: M0, M1, M2, M2.5 complete
 
 ```
-M0  ✅ spec-kit scaffolding, constitution, spec/plan/tasks, 4-service compose skeleton
-M1  ✅ mock dataset generator, session-state schemas, checkpointer persistence, Phoenix tracing
-M2  ✅ Conversational Interview (User Story 1) — DeepAgents agent, A2UI surface, WebSocket API, React frontend
-M3  ⬜ NEXT — Research & Ranked Recommendations (User Story 2)
-M4a ⬜ Booking form MCP App (User Story 3)
-M4b ⬜ Mock checkout MCP App (User Story 4)
-M4c ⬜ Session resume (User Story 5)
-M5  ⬜ Observability wiring end-to-end + evals
-M6  ⬜ Hardening, E2E tests, README finalization, deck, demo video
+M0   ✅ spec-kit scaffolding, constitution, spec/plan/tasks, 4-service compose skeleton
+M1   ✅ mock dataset generator, session-state schemas, checkpointer persistence, Phoenix tracing
+M2   ✅ Conversational Interview (User Story 1) — DeepAgents agent, A2UI surface, WebSocket API, React frontend
+M2.5 ✅ Audit remediation — see §13. Two Constitution principles were
+        recorded as PASS while having no production code path at all.
+M3   ⬜ NEXT — Research & Ranked Recommendations (User Story 2)
+M4a  ⬜ Booking form MCP App (User Story 3)
+M4b  ⬜ Mock checkout MCP App (User Story 4)
+M4c  ⬜ Session resume (User Story 5)
+M5   ⬜ Evals (observability itself is now wired, M2.5/T051)
+M6   ⬜ Hardening, E2E tests, README finalization, deck, demo video
 ```
 
-**Test suite**: 26 tests total, all green.
-- `agent-backend`: 19 pass unconditionally + 4 auto-skip (gated on live LLM
+**Test suite**: 47 pass without any external setup.
+- `agent-backend`: 39 pass unconditionally + 3 auto-skip (gated on live LLM
   credentials or a running Phoenix)
-- `mcp-services`: 7 pass
+- `mcp-services`: 8 pass
+
+⚠️ The credential gate checks key **presence** only. With a key set but out
+of quota, the live tests **fail** rather than skip. Check the provider
+account before assuming a code bug.
 
 **Git log** (main, clean, synced with origin):
 ```
@@ -113,11 +119,11 @@ ff56417  M0: spec-kit scaffolding, constitution, spec/plan/tasks, repo skeleton
                     WebSocket /ws/{session_id}
 ┌───────────────────────────────▼────────────────────────────────────┐
 │  agent-backend (Python 3.14, FastAPI, port 8000)                   │
-│   ├─ agent/graph.py       build_interview_agent() = create_deep_agent│
+│   ├─ agent/graph.py       PhaseAgentRegistry: one agent per phase  │
 │   ├─ agent/tools.py       save_interview_state (Command-based)     │
 │   ├─ agent/state.py       SessionState + phase gate                │
 │   ├─ agent/render_a2ui.py deterministic domain → A2UI JSON         │
-│   ├─ agent/llm.py         OpenRouter via langchain-openai          │
+│   ├─ agent/llm.py         Gemini via langchain-google-genai        │
 │   ├─ api/main.py          WebSocket bridge                         │
 │   └─ SqliteSaver checkpointer → /app/data/sessions.sqlite (volume) │
 └──────┬─────────────────────────────────────────┬───────────────────┘
@@ -151,14 +157,30 @@ ports are unchanged (6006/4317).
 | `uv` / `specify` | Installed at `~/.local/bin` — `export PATH="$HOME/.local/bin:$PATH"` |
 | spec-kit CLI flag | It is `--integration claude`, **not** `--ai`; also needs `--ignore-agent-tools` here |
 
-**Secrets**: `agent-backend/.env` holds `OPENROUTER_API_KEY` (gitignored,
-verified). `agent-backend/.env.example` is the committed no-secrets template.
-Never commit real values; never echo the key into logs or traces.
+**Secrets**: `agent-backend/.env` holds `LLM_API_KEY` (gitignored, verified
+absent from both the built image and the JS bundle).
+`agent-backend/.env.example` is the committed no-secrets template. Never
+commit real values; never echo the key into logs or traces.
 
-⚠️ **Known live issue**: during M2 verification the OpenRouter account ran
-**out of credits** mid-session. The app now degrades gracefully instead of
-dying (see §7), but **live LLM tests will skip/fail until credits are topped
-up**. Confirm credit status before assuming an LLM bug.
+⚠️ **LLM provider status** (changed in M2.5):
+- **OpenRouter is exhausted** — free tier, ~$0 left. A 20-token probe
+  succeeds; the app's configured calls return `402`. No longer used.
+- **Now on Google Gemini** (`LLM_PROVIDER=google`, default model
+  `gemini-3.6-flash`), via the **native** `langchain-google-genai` client.
+- **Gemini free tier is ~20 requests/day/model.** Enough for a smoke test,
+  *not* for a demo or the T046 eval run. A billed key is needed before the
+  demo. Each model has its own quota, so switching `LLM_MODEL` buys more
+  headroom during development.
+- **Do not switch Gemini to its OpenAI-compat endpoint.** Gemini 3.x are
+  thinking models; their function calls carry a `thought_signature` that
+  must be echoed back, the compat layer drops it, and the *second* turn of
+  every tool-using conversation dies with `400 INVALID_ARGUMENT`. Verified;
+  `reasoning_effort` does not fix it.
+- **NVIDIA NIM was tried as a fallback and did not work here** — its
+  non-streaming `/chat/completions` returned nothing in 120s, and large
+  tool-laden requests hung even when streaming. `/models` responds fine.
+  The `openai_compatible` provider path exists and is wired, but is
+  **unverified end-to-end**.
 
 ---
 
@@ -178,7 +200,7 @@ docker compose up --build
 source .venv/bin/activate
 (cd agent-backend && python -m pytest tests/ -v)
 (cd mcp-services && python -m pytest tests/ -v)
-#   4 tests auto-skip without OPENROUTER_API_KEY / running Phoenix — that's correct behavior
+#   3 tests auto-skip without LLM_API_KEY / running Phoenix — that's correct behavior
 
 # Regenerate mock dataset (deterministic — output is byte-identical each run)
 python mcp-services/data/generate_listings.py
@@ -207,8 +229,8 @@ python mcp-services/data/generate_listings.py
 | `agent/state.py` | `Phase` enum (6 phases), `InterviewState`, `SessionState`, `RankedRecommendation`, `Booking`, `PaymentConfirmation`. Has `missing_slots()`, `is_complete()`, `save_interview_slots()` (**overwrites, never appends**), and `available_tools()` (**the per-phase tool gate**) |
 | `agent/graph.py` | Two things: (a) M1's minimal `build_graph()`/`compiled_graph()` persistence scaffold — **keep as-is**, `test_graph_persistence.py` depends on its exact shape; (b) M2's `build_interview_agent(checkpointer)` = real `create_deep_agent(...)`, plus `CarMatchmakerState(DeepAgentState)` carrying `session: dict` |
 | `agent/tools.py` | `save_interview_state` — a `@tool` returning a LangGraph `Command` to update state |
-| `agent/prompts.py` | `INTERVIEW_SYSTEM_PROMPT` |
-| `agent/llm.py` | `build_model()` → `ChatOpenAI` pointed at OpenRouter (`base_url=https://openrouter.ai/api/v1`). Model via `OPENROUTER_MODEL`, default `anthropic/claude-sonnet-4.5`. Raises a clear error if key missing |
+| `agent/prompts.py` | `PHASE_SYSTEM_PROMPTS` — one prompt per phase. Listing-facing phases carry `UNTRUSTED_DATA_RULE` (Principle IV) |
+| `agent/llm.py` | `build_model()` selects a client from `LLM_PROVIDER` (`google` → `ChatGoogleGenerativeAI`, default model `gemini-3.6-flash`; `openai_compatible` → `ChatOpenAI` + `LLM_BASE_URL`). Raises `LLMNotConfiguredError` if `LLM_API_KEY` is missing |
 | `agent/render_a2ui.py` | `build_interview_surface_init()` / `build_interview_surface_update()`. **A2UI protocol v0.9**, catalog `https://a2ui.org/specification/v0_9/catalogs/basic/catalog.json` |
 | `api/main.py` | FastAPI. `GET /health`, `WS /ws/{session_id}`. Owns the SqliteSaver lifespan |
 | `observability/otel_setup.py` | `setup_observability()` → `phoenix.otel.register(..., protocol="grpc", auto_instrument=True)` |
@@ -338,17 +360,60 @@ current reality.
 
 ---
 
+## 13. M2.5 — what the pre-M3 audit found (read before trusting a doc)
+
+A full audit (fresh clone, fresh venv, fresh Docker build, live stack, live
+WebSocket session) ran before M3. It found that **plan.md's Constitution
+Check table recorded two principles as PASS while the code had no such path
+at all**:
+
+| Was claimed | Reality found | Now |
+|---|---|---|
+| Principle V — "OTel registration is process-level init" | `setup_observability()` had **zero** production callers. A live session against the running stack produced **zero spans** in Phoenix. FR-012 and the observability *bonus* were unmet. | Called from FastAPI lifespan before any agent is built; fail-soft. `test_observability_wiring.py` |
+| Principle II — "tool list is filtered per-phase in graph.py" | `available_tools()` had **zero** production callers; `build_interview_agent()` hardcoded its tools. | `TOOLS_BY_PHASE` is the single gate; `PhaseAgentRegistry` builds one agent per phase from it. `test_phase_gate.py` |
+
+Also fixed: `agent.invoke()` blocking the async event loop (serialized all
+concurrent sessions); backend dying at startup without an API key; frontend
+Docker build ignoring `package-lock.json`; no guard that committed
+`listings.json` matched its generator; Gemini content-blocks being sent
+where the frontend expects a string.
+
+**Accepted deviation**: `create_deep_agent` always installs
+`FilesystemMiddleware`, binding 9 built-in tools (`ls`, `read_file`,
+`write_file`, `edit_file`, `delete`, `glob`, `grep`, `execute`, `task`) in
+*every* phase, outside our gate — not removable via its public API. Safe
+because the default `StateBackend` is a virtual filesystem in graph state:
+it never touches the host and has no `execute` implementation, so shell
+execution is inert. `test_phase_gate.py` pins the built-in set and asserts
+`StateBackend.execute` stays absent, so a dependency upgrade that widens
+the agent's reach fails the suite. **Re-check this at M3**, when untrusted
+listing text starts reaching the model.
+
+**Lesson worth keeping**: "tests pass" and "a table says PASS" did not mean
+the feature existed. The thing that caught both was running the live stack
+and querying Phoenix for actual spans, plus grepping for call sites of
+functions the docs claimed were load-bearing.
+
+---
+
 ## 10. Open items / known gaps
 
 - **Slide deck template** — organizers haven't provided it yet. T049 blocked.
 - **Demo video** — T050. Recording is the user's to do; the agent can script it.
 - **A2UI styling** — components render unstyled due to the broken CSS export
   (§7.2). Needs custom styling for demo polish.
-- **OpenRouter credits** — exhausted during M2. Live-LLM tests skip until topped up.
-- **`agent-backend/app_stub.py`** — dead M0 leftover, safe to delete.
-- **`plan.md` still says "Lit renderer"** in places; the real implementation uses
-  `@a2ui/react`. tasks.md T019 records the deviation. Consider reconciling plan.md.
+- **LLM quota** — Gemini free tier is ~20 req/day/model. **A billed key is
+  required before the demo and before the T046 eval run.**
 - **`langchain-mcp-adapters` API unverified** — must be checked at M3 start.
+- **`docker-compose.yml` has no `healthcheck:` blocks** — `depends_on` only
+  waits for container start, not readiness. Harmless today (tracing is
+  fail-soft) but worth adding for demo robustness.
+- **Nothing consumes `Phase.RESEARCHING` yet** — `save_interview_slots()`
+  flips the phase, but no code acts on it, so the interview agent keeps
+  running. This is exactly M3/T025's job.
+
+*(Resolved in M2.5: `app_stub.py` deleted; plan.md's stale Lit reference and
+its two false Constitution PASS rows corrected; OpenRouter replaced.)*
 
 ---
 

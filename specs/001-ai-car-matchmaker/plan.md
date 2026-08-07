@@ -21,7 +21,8 @@ OpenTelemetry into Arize Phoenix.
 on Node 22, build-time only (mcp-apps-ui bundles, frontend)
 
 **Primary Dependencies**: `langchain`, `deepagents` (LangGraph),
-`langchain-openai` (LLM client — see LLM Provider note below), `mcp`
+`langchain-google-genai` (primary LLM client) and `langchain-openai`
+(alternative providers — see LLM Provider note below), `mcp`
 (Python SDK, Streamable HTTP transport), `langchain-mcp-adapters` (MCP
 tools → LangChain tool adapters — still **NEEDS VERIFICATION** in M3, not
 yet used), `arize-phoenix-otel`, `openinference-instrumentation-langchain`,
@@ -30,13 +31,34 @@ React + Vite, `@a2ui/react` + `@a2ui/web_core` (v0_9 subpath —
 embed as originally planned; see M2 findings in tasks.md),
 `@modelcontextprotocol/ext-apps`
 
-**LLM Provider** (resolved during M2, not specified at initial planning):
-OpenRouter (OpenAI-compatible API) via `langchain_openai.ChatOpenAI` with a
-custom `base_url`, not a direct Anthropic/OpenAI SDK integration. Model is
-configurable via `OPENROUTER_MODEL` env var (default
-`anthropic/claude-sonnet-4.5`), so switching models is a config change, not
-a code change. Credentials via `agent-backend/.env` (gitignored, never
-committed — `.env.example` documents the required keys).
+**LLM Provider** (resolved M2, revised M2.5): Google Gemini via the native
+`langchain-google-genai` client. `agent/llm.py` selects a client from
+`LLM_PROVIDER` (`google` | `openai_compatible`), with `LLM_MODEL` /
+`LLM_API_KEY` / `LLM_BASE_URL` alongside it, so switching provider or model
+stays a config change. Default model `gemini-3.6-flash`.
+
+Why native rather than Gemini's OpenAI-compatibility endpoint, which would
+have been the smaller change: Gemini 3.x are thinking models whose function
+calls carry a `thought_signature` that must be echoed back on the next
+turn. The compatibility layer drops it, so the **second** turn of any
+tool-using conversation fails with `400 INVALID_ARGUMENT — Function call is
+missing a thought_signature`. Reproduced directly through
+`langchain_openai` against the compat endpoint, not fixed by
+`reasoning_effort`, and confirmed absent with the native client on the same
+interview turn. Every phase of this agent is tool-driven, so the compat
+path is unusable for Gemini 3.x.
+
+The `openai_compatible` path is retained for other providers (OpenRouter,
+NVIDIA NIM). It is **not verified end-to-end** — NVIDIA NIM's
+non-streaming `/chat/completions` did not respond from the dev environment,
+and large tool-laden requests hung even when streaming.
+
+Operational constraint: the Gemini **free tier allows ~20 requests per day
+per model**, enough for a smoke test but not a live demo or an eval run
+(T046). A billed key is required before the demo.
+
+Credentials via `agent-backend/.env` (gitignored, never committed —
+`.env.example` documents the required keys).
 
 **Storage**: SQLite — one file for the LangGraph checkpointer (session
 state), one for the mock listings dataset
@@ -64,14 +86,32 @@ mock listings
 
 | Principle | Gate | Status |
 |---|---|---|
-| I. Grounded Recommendations | UI values sourced only from tool-call records, never LLM-retyped | PASS — enforced by `render_a2ui.py` reading structured tool output directly (see agent-backend design) |
-| II. Explicit Phase Gating | Transactional tools unavailable outside their phase | PASS — tool list is filtered per-phase in `agent/graph.py` before being handed to the model |
-| III. Mock-Only Transactions | No real payment path exists | PASS — `confirm_mock_payment` has no external payment gateway dependency; card-like fields discarded post-validation |
-| IV. Untrusted Data Boundary | Listing/user text never treated as instructions | PASS — prompt templates delimit untrusted content explicitly |
-| V. Full Observability | Every call/transition traced | PASS — OTel registration is process-level init in `agent-backend`, not opt-in per call site |
+| I. Grounded Recommendations | UI values sourced only from tool-call records, never LLM-retyped | PASS — `render_a2ui.py` reads structured state/tool output directly; covered by `test_render_a2ui.py` |
+| II. Explicit Phase Gating | Transactional tools unavailable outside their phase | PASS (since M2.5) — `TOOLS_BY_PHASE` in `agent/state.py` is the single gate definition, and `agent/graph.py` builds one agent per phase from it; covered by `test_phase_gate.py` |
+| III. Mock-Only Transactions | No real payment path exists | PENDING — nothing to enforce yet; `confirm_mock_payment` lands in M4b |
+| IV. Untrusted Data Boundary | Listing/user text never treated as instructions | PARTIAL — delimiters and the "data, never instructions" rule are in every listing-facing prompt (`agent/prompts.py`), asserted by `test_phase_gate.py`. Behavioral proof against the seeded `ADV-*` probes is T029, in M3 |
+| V. Full Observability | Every call/transition traced | PASS (since M2.5) — `setup_observability()` is called from the FastAPI lifespan before any agent is built; covered by `test_observability_wiring.py` + `test_otel_setup.py` |
 
-No violations identified. Complexity Tracking table below is empty as a
-result.
+### Correction (M2.5)
+
+Rows II and V previously read PASS and were **wrong**. An audit before M3
+found that `available_tools()` and `setup_observability()` each had zero
+production callers — the phase gate was an unused data structure, and a
+full live session emitted zero spans to a running Phoenix. Both are now
+genuinely wired and regression-tested. Recorded here rather than silently
+edited, because the failure mode worth remembering is that a Constitution
+Check table can pass review while describing code that does not exist.
+
+Known deviation, accepted: `create_deep_agent` always installs
+`FilesystemMiddleware`, which binds nine built-in tools (`ls`, `read_file`,
+`write_file`, `edit_file`, `delete`, `glob`, `grep`, `execute`, `task`) in
+every phase, outside our gate. They are not removable through its public
+API. They are acceptable because the default `StateBackend` is a virtual
+filesystem held in graph state — it never touches the host, and it exposes
+no `execute` implementation, so shell execution is inert.
+`test_phase_gate.py` pins both the exact built-in set and the absence of
+`StateBackend.execute`, so a dependency upgrade that widens the agent's
+reach fails the suite instead of passing unnoticed.
 
 ## Project Structure
 

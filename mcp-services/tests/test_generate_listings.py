@@ -2,7 +2,9 @@
 across >=10 categories with >=10 distinct brands represented per category,
 on every run — not just the one currently checked in.
 """
+import json
 from collections import defaultdict
+from pathlib import Path
 
 from data.generate_listings import CATEGORIES, generate
 
@@ -60,3 +62,17 @@ def test_adversarial_probes_present_and_tagged():
     listings = generate()
     adversarial = [l for l in listings if l["id"].startswith("ADV-")]
     assert 2 <= len(adversarial) <= 5
+
+
+def test_committed_listings_json_matches_the_generator():
+    """F6: the marketplace MCP server (M3) reads listings.json from disk,
+    but every other test here calls generate() in process -- so drift
+    between the committed file and the generator would be invisible to the
+    suite while silently changing what the agent actually searches.
+    """
+    committed_path = Path(__file__).resolve().parent.parent / "data" / "listings.json"
+    committed = json.loads(committed_path.read_text())
+    assert committed == generate(), (
+        "listings.json is out of date with generate_listings.py -- "
+        "re-run `python mcp-services/data/generate_listings.py` and commit."
+    )

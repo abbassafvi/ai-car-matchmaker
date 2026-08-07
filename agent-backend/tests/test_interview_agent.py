@@ -1,7 +1,7 @@
 """Live integration test for the real interview agent (US1 Acceptance
 Scenario 3: all slots filled -> phase auto-transitions to RESEARCHING with
 no further prompt needed). Needs a real LLM call, so it's skipped cleanly
-when OPENROUTER_API_KEY isn't set -- same pattern as test_otel_setup.py.
+when LLM_API_KEY isn't set -- same pattern as test_otel_setup.py.
 
 Deliberately just one live-LLM test here: each call costs real tokens
 against a real account, and the tool-level logic (overwrite semantics,
@@ -19,10 +19,10 @@ from agent.graph import build_interview_agent, new_session_state
 
 
 def _has_llm_credentials() -> bool:
-    return bool(os.environ.get("OPENROUTER_API_KEY"))
+    return bool(os.environ.get("LLM_API_KEY"))
 
 
-@pytest.mark.skipif(not _has_llm_credentials(), reason="OPENROUTER_API_KEY not set")
+@pytest.mark.skipif(not _has_llm_credentials(), reason="LLM_API_KEY not set")
 def test_all_slots_in_one_message_transitions_to_researching():
     agent = build_interview_agent(checkpointer=InMemorySaver())
     config = {"configurable": {"thread_id": "test-thread-1"}}

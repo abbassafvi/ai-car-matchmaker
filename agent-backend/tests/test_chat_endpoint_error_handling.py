@@ -23,9 +23,11 @@ import uuid
 
 from fastapi.testclient import TestClient
 
+from agent.state import Phase
+
 
 def test_agent_failure_sends_graceful_error_and_keeps_connection_open(tmp_path, monkeypatch):
-    monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-v1-test-dummy-not-a-real-key")
+    monkeypatch.setenv("LLM_API_KEY", "test-dummy-not-a-real-key")
     monkeypatch.setenv("SESSIONS_DB_PATH", str(tmp_path / "sessions.sqlite"))
     from api.main import app
 
@@ -35,7 +37,10 @@ def test_agent_failure_sends_graceful_error_and_keeps_connection_open(tmp_path, 
         def _boom(*args, **kwargs):
             raise RuntimeError("simulated provider failure")
 
-        monkeypatch.setattr(app.state.agent, "invoke", _boom)
+        # Patch the agent the registry returns for this phase, rather than a
+        # single app-level agent -- the handler now selects its agent per
+        # turn from the phase gate.
+        monkeypatch.setattr(app.state.agents.for_phase(Phase.INTERVIEWING), "invoke", _boom)
 
         with client.websocket_connect(f"/ws/{session_id}") as ws:
             init_msg = ws.receive_json()

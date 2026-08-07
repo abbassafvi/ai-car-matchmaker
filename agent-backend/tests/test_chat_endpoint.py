@@ -1,7 +1,7 @@
 """Live integration test for the WebSocket chat endpoint -- the actual
 frontend-facing contract (connect, get initial A2UI surface, send a chat
 message, get a chat reply plus an A2UI update). Needs a real LLM call, so
-it's skipped cleanly without OPENROUTER_API_KEY, matching the pattern in
+it's skipped cleanly without LLM_API_KEY, matching the pattern in
 test_otel_setup.py / test_interview_agent.py.
 """
 import os
@@ -12,10 +12,10 @@ from fastapi.testclient import TestClient
 
 
 def _has_llm_credentials() -> bool:
-    return bool(os.environ.get("OPENROUTER_API_KEY"))
+    return bool(os.environ.get("LLM_API_KEY"))
 
 
-@pytest.mark.skipif(not _has_llm_credentials(), reason="OPENROUTER_API_KEY not set")
+@pytest.mark.skipif(not _has_llm_credentials(), reason="LLM_API_KEY not set")
 def test_full_round_trip_over_websocket(tmp_path):
     os.environ["SESSIONS_DB_PATH"] = str(tmp_path / "sessions.sqlite")
     from api.main import app  # imported here so SESSIONS_DB_PATH is set first
@@ -49,12 +49,39 @@ def test_full_round_trip_over_websocket(tmp_path):
             assert slots["category"]["value"] == "Sedan"
 
 
-@pytest.mark.skipif(not _has_llm_credentials(), reason="OPENROUTER_API_KEY not set")
-def test_health_endpoint(tmp_path):
-    os.environ["SESSIONS_DB_PATH"] = str(tmp_path / "sessions.sqlite")
+def test_health_endpoint_reports_ok_when_configured(tmp_path, monkeypatch):
+    monkeypatch.setenv("LLM_API_KEY", "test-dummy-not-a-real-key")
+    monkeypatch.setenv("SESSIONS_DB_PATH", str(tmp_path / "sessions.sqlite"))
     from api.main import app
 
     with TestClient(app) as client:
         resp = client.get("/health")
         assert resp.status_code == 200
         assert resp.json()["status"] == "ok"
+        assert resp.json()["llm_configured"] is True
+
+
+def test_backend_boots_and_reports_degraded_without_an_llm_key(tmp_path, monkeypatch):
+    """F7: a missing key must not kill the container at startup.
+
+    Previously build_model() raised inside lifespan, so `docker compose up`
+    without a configured .env exited the agent-backend service instead of
+    surfacing a readable cause. The app now boots degraded and says so.
+    """
+    monkeypatch.delenv("LLM_API_KEY", raising=False)
+    monkeypatch.setenv("SESSIONS_DB_PATH", str(tmp_path / "sessions.sqlite"))
+    from api.main import app
+
+    with TestClient(app) as client:
+        resp = client.get("/health")
+        assert resp.status_code == 200
+        assert resp.json()["status"] == "degraded"
+        assert resp.json()["llm_configured"] is False
+
+        # And a chat turn explains itself rather than dropping the socket.
+        with client.websocket_connect(f"/ws/degraded-{uuid.uuid4().hex[:8]}") as ws:
+            assert ws.receive_json()["type"] == "a2ui"
+            ws.send_json({"type": "chat", "content": "hello"})
+            err = ws.receive_json()
+            assert err["type"] == "error"
+            assert "LLM_API_KEY" in err["message"]

@@ -4,6 +4,7 @@ langgraph-checkpoint-sqlite>=3.1,<4
 arize-phoenix-otel>=0.16,<0.17
 openinference-instrumentation-langchain>=0.1.70,<0.2
 langchain-openai>=1.4,<2
+langchain-google-genai>=4.3.1,<5
 deepagents>=0.7,<0.8
 fastapi>=0.141,<0.142
 uvicorn[standard]>=0.52,<0.53

@@ -88,27 +88,81 @@ one contradiction, verify persisted state + A2UI progress surface.
 
 ### Tests for User Story 1
 
-- [ ] T012 [P] [US1] Unit test: `save_interview_state` overwrites (not
-      appends) on conflicting slot updates — `agent-backend/tests/test_state.py`
-- [ ] T013 [P] [US1] Integration test: phase auto-transitions
+- [x] T012 [P] [US1] Unit test: `save_interview_state` overwrites (not
+      appends) on conflicting slot updates —
+      `agent-backend/tests/test_state.py` (SessionState layer, 6 tests) +
+      `agent-backend/tests/test_tools.py` (tool layer, 5 tests, called via
+      `.func` directly — `InjectedState` only resolves inside a real
+      compiled graph, confirmed empirically before writing the tests)
+- [x] T013 [P] [US1] Integration test: phase auto-transitions
       INTERVIEWING → RESEARCHING only once all 5 slots are non-null —
-      `agent-backend/tests/test_phase_gate.py`
+      `agent-backend/tests/test_interview_agent.py`, live LLM call,
+      auto-skips without `OPENROUTER_API_KEY`
 
 ### Implementation for User Story 1
 
-- [ ] T014 [US1] `agent-backend/agent/tools.py`: `save_interview_state` tool
-- [ ] T015 [US1] `agent-backend/agent/prompts.py`: interview system prompt
-      (ask only missing slots; untrusted-data delimiters per Principle IV)
-- [ ] T016 [US1] `agent-backend/agent/graph.py`: INTERVIEWING phase node +
-      transition guard
-- [ ] T017 [US1] `agent-backend/agent/render_a2ui.py`: interview-progress
-      A2UI surface (checklist of the 5 slots)
-- [ ] T018 [US1] `agent-backend/api/`: WebSocket/SSE chat endpoint streaming
-      both chat text and A2UI surface updates
-- [ ] T019 [US1] `frontend/src/chat/` + `frontend/src/a2ui/`: chat shell
-      wired to the Lit A2UI renderer, rendering the interview-progress surface
+- [x] T014 [US1] `agent-backend/agent/tools.py`: `save_interview_state` tool
+- [x] T015 [US1] `agent-backend/agent/prompts.py`: interview system prompt
+      (ask only missing slots; untrusted-data delimiters deferred to M3 —
+      interview input is the user's own words, not third-party content)
+- [x] T016 [US1] `agent-backend/agent/graph.py`: real DeepAgents-based
+      `build_interview_agent()`, additive alongside M1's minimal
+      persistence-proof graph (kept as-is, still covers the checkpointer
+      contract in isolation)
+- [x] T017 [US1] `agent-backend/agent/render_a2ui.py`: interview-progress
+      A2UI surface (checklist of the 5 slots). **Deviation from plan.md**:
+      targets protocol **v0.9**, not v1.0 — verified the only real,
+      installable renderer (`@a2ui/react` on npm, v0.10.2) ships v0_8/v0_9
+      builds only, no v1_0 export yet; v0.9's message/component shapes are
+      compatible with v1.0's, confirmed by comparing both spec versions
+      directly before writing this
+- [x] T018 [US1] `agent-backend/api/main.py`: FastAPI WebSocket endpoint
+      (`/ws/{session_id}`) streaming chat text + A2UI surface updates,
+      backed by the same SqliteSaver checkpointer proven in M1. Verified
+      live end-to-end via a real WebSocket round trip
+      (`agent-backend/tests/test_chat_endpoint.py`)
+- [x] T019 [US1] `frontend/`: React + Vite chat shell. **Deviation from
+      plan.md**: uses the real **`@a2ui/react`** package, not a hand-rolled
+      Lit embed — `@a2ui/react` turned out to exist and be published on
+      npm, which is strictly better than the planned approach (real
+      official renderer vs. reimplementing one). Verified live in-browser
+      against the full stack, including a real conversation turn.
 
-**Checkpoint**: Full interview flow works end-to-end in the browser.
+**Live-verification findings** (bugs caught and fixed, not just noted):
+- `@a2ui/react@0.10.2`'s `"./styles/structural.css"` export points at a
+  file that isn't actually in the published package — dropped the import,
+  components render unstyled but functional.
+- The WebSocket handler had **no error handling** around `agent.invoke()`
+  — any failure (observed live: OpenRouter account credits exhausted mid-session)
+  killed the connection silently. Fixed with a try/except that sends a
+  graceful `{"type": "error", ...}` message and keeps the connection alive;
+  regression-tested without needing real LLM credits
+  (`agent-backend/tests/test_chat_endpoint_error_handling.py`, monkeypatches
+  the failure directly).
+- That same regression test originally set its dummy API key via
+  `os.environ.setdefault(...)` at **module level**, which executes at
+  pytest collection time — leaking into `test_interview_agent.py`'s
+  `skipif` check (evaluated at collection time too) and causing it to
+  attempt a real API call with a fake key instead of skipping. Caught by
+  running the full suite together, not the file in isolation. Fixed with
+  function-scoped `monkeypatch.setenv`, which pytest auto-reverts.
+- The Browser automation tool's coordinate-based click didn't reliably
+  trigger the Send button's React handler (separately, typing didn't
+  dispatch events React's controlled `<input>` recognized). Isolated by
+  driving the WebSocket directly from the console first, then fixing the
+  input via the native value setter + `dispatchEvent`, and the button via
+  `.click()`. Confirmed as a tooling quirk, not an application bug, before
+  moving on.
+
+**Checkpoint**: Full interview flow verified end-to-end in the browser —
+real WebSocket connection to the real backend, real `@a2ui/react` rendering
+of the live interview-progress surface, real chat message rendering for
+both success and graceful-failure paths, real Docker Compose build
+(multi-stage frontend image, real `agent-backend` image with installed
+deps) with secrets verified absent from both the built JS bundle and the
+image layers. 23 automated tests total across `agent-backend` (19
+unconditional + 4 live-LLM/Phoenix-gated, auto-skip cleanly without
+credentials/Phoenix running — verified with `env -u OPENROUTER_API_KEY`).
 
 ---
 

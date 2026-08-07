@@ -10,45 +10,46 @@ Built for the Amulate Summer Hackathon 2026.
 
 ## Status
 
-M0 (scaffolding) + M1 (foundational: mock dataset generator, session-state
-schemas, checkpointer persistence, Phoenix tracing) complete — 16 automated
-tests passing. See [`specs/001-ai-car-matchmaker/`](specs/001-ai-car-matchmaker/)
-for the full spec-driven-development trail:
+M0 (scaffolding) + M1 (foundational) + M2 (conversational interview, User
+Story 1) complete — 23 automated tests, plus live end-to-end verification
+in a real browser against a real Docker Compose build. See
+[`specs/001-ai-car-matchmaker/`](specs/001-ai-car-matchmaker/) for the full
+spec-driven-development trail:
 
 - [`spec.md`](specs/001-ai-car-matchmaker/spec.md) — user stories, requirements, success criteria
 - [`plan.md`](specs/001-ai-car-matchmaker/plan.md) — architecture, tech stack, constitution gates
-- [`tasks.md`](specs/001-ai-car-matchmaker/tasks.md) — milestone-by-milestone task breakdown
+- [`tasks.md`](specs/001-ai-car-matchmaker/tasks.md) — milestone-by-milestone task breakdown, including bugs found during live verification
 - [`.specify/memory/constitution.md`](.specify/memory/constitution.md) — non-negotiable project principles
 
 ## Architecture
 
 ```
 frontend (React + Vite)          agent-backend (Python)         mcp-services (Python)
- ├─ A2UI renderer (Lit)     ◄──►   LangChain DeepAgents    ◄──►   marketplace / booking / payment
- └─ MCP-Apps host (iframes)       LangGraph + SqliteSaver         MCP servers over Streamable HTTP
-                                          │
-                                          ▼
-                                   Arize Phoenix (OTel traces)
+ ├─ A2UI renderer (@a2ui/react)  LangChain DeepAgents    ◄──►   marketplace / booking / payment
+ └─ MCP-Apps host (iframes, M4)  LangGraph + SqliteSaver        MCP servers over Streamable HTTP
+        │                               │                              (M3+)
+        │ WebSocket                     ▼
+        └──────────────────►    Arize Phoenix (OTel traces)
 ```
 
 ## Running locally
 
-```bash
-docker compose up --build
-```
+1. Copy `agent-backend/.env.example` to `agent-backend/.env` and fill in
+   `OPENROUTER_API_KEY` (get one at [openrouter.ai](https://openrouter.ai/)).
+2. `docker compose up --build`
 
 | Service | URL |
 |---|---|
 | Frontend | http://localhost:3000 |
-| Agent backend (health) | http://localhost:8000 |
-| MCP services (health) | http://localhost:8100 |
+| Agent backend (health) | http://localhost:8000/health |
+| Agent backend (chat) | ws://localhost:8000/ws/{session_id} |
+| MCP services (health, M0 stub) | http://localhost:8100 |
 | Phoenix (traces UI) | http://localhost:16006 |
 
-Currently all *services* are M0 health-check stubs — the M1 foundational
-modules (dataset generator, state schemas, checkpointer, tracing) exist and
-are tested but aren't wired into the running containers yet; that lands in
-M2/M3 alongside the real agent and MCP server logic. This section will be
-updated as each milestone ships.
+`mcp-services` is still an M0 health-check stub — real marketplace/booking/
+payment MCP servers land in M3/M4. Everything else is real: the frontend is
+a production Vite build served by nginx, `agent-backend` runs the actual
+FastAPI + DeepAgents interview agent.
 
 ## Running tests locally
 
@@ -57,17 +58,23 @@ python3 -m venv .venv && source .venv/bin/activate
 pip install -r agent-backend/requirements.txt -r mcp-services/requirements.txt
 
 (cd mcp-services && python -m pytest tests/ -v)
-(cd agent-backend && python -m pytest tests/ -v)   # otel test auto-skips
-                                                     # unless Phoenix is up:
-                                                     #   docker compose up -d phoenix
+(cd agent-backend && python -m pytest tests/ -v)
 ```
+
+Two test categories auto-skip without extra setup rather than failing:
+
+- Anything needing a live LLM call skips without `OPENROUTER_API_KEY` set
+  (export it, or `source agent-backend/.env` first, to run them)
+- The Phoenix tracing test skips unless Phoenix is running:
+  `docker compose up -d phoenix`
 
 ## Tech stack
 
 - **Agent harness**: [LangChain DeepAgents](https://docs.langchain.com/labs/deep-agents/overview) (LangGraph)
-- **Tool protocol**: [MCP](https://modelcontextprotocol.io/) (Python SDK, Streamable HTTP)
-- **In-chat transactional UI**: [MCP Apps](https://apps.extensions.modelcontextprotocol.io/) — booking form + mock checkout (sandboxed iframes)
-- **Generative UI**: [A2UI](https://a2ui.org/) — car catalogue + live agent progress/reasoning
+- **LLM provider**: [OpenRouter](https://openrouter.ai/) (OpenAI-compatible API), model configurable via `OPENROUTER_MODEL` — no code changes to switch models
+- **Tool protocol**: [MCP](https://modelcontextprotocol.io/) (Python SDK, Streamable HTTP) — M3+
+- **In-chat transactional UI**: [MCP Apps](https://apps.extensions.modelcontextprotocol.io/) — booking form + mock checkout (sandboxed iframes) — M4
+- **Generative UI**: [A2UI](https://a2ui.org/) v0.9 protocol via the real [`@a2ui/react`](https://www.npmjs.com/package/@a2ui/react) renderer — car catalogue + live agent progress/reasoning
 - **Observability**: [Arize Phoenix](https://arize.com/docs/phoenix) via OpenTelemetry
 - **Spec process**: [spec-kit](https://github.com/github/spec-kit)
 

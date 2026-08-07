@@ -20,11 +20,23 @@ OpenTelemetry into Arize Phoenix.
 **Language/Version**: Python 3.14 (agent-backend, mcp-services) · TypeScript
 on Node 22, build-time only (mcp-apps-ui bundles, frontend)
 
-**Primary Dependencies**: `langchain`, `deepagents` (LangGraph), `mcp`
+**Primary Dependencies**: `langchain`, `deepagents` (LangGraph),
+`langchain-openai` (LLM client — see LLM Provider note below), `mcp`
 (Python SDK, Streamable HTTP transport), `langchain-mcp-adapters` (MCP
-tools → LangChain tool adapters — **NEEDS VERIFICATION** against current
-API in M2), `arize-phoenix-otel`, `openinference-instrumentation-langchain`,
-React + Vite, Lit-based A2UI renderer, `@modelcontextprotocol/ext-apps`
+tools → LangChain tool adapters — still **NEEDS VERIFICATION** in M3, not
+yet used), `arize-phoenix-otel`, `openinference-instrumentation-langchain`,
+React + Vite, `@a2ui/react` + `@a2ui/web_core` (v0_9 subpath —
+**resolved**: this is a real published npm package, not a hand-rolled Lit
+embed as originally planned; see M2 findings in tasks.md),
+`@modelcontextprotocol/ext-apps`
+
+**LLM Provider** (resolved during M2, not specified at initial planning):
+OpenRouter (OpenAI-compatible API) via `langchain_openai.ChatOpenAI` with a
+custom `base_url`, not a direct Anthropic/OpenAI SDK integration. Model is
+configurable via `OPENROUTER_MODEL` env var (default
+`anthropic/claude-sonnet-4.5`), so switching models is a config change, not
+a code change. Credentials via `agent-backend/.env` (gitignored, never
+committed — `.env.example` documents the required keys).
 
 **Storage**: SQLite — one file for the LangGraph checkpointer (session
 state), one for the mock listings dataset
@@ -103,9 +115,12 @@ mcp-apps-ui/                        # TypeScript, browser-only bundles (no serve
 
 frontend/                           # React + Vite
 ├── src/
-│   ├── chat/                       # chat shell, message stream (WS/SSE client)
-│   ├── a2ui/                       # Lit renderer integration
-│   └── mcp-app-host/               # our Host impl: iframe sandbox, CSP,
+│   ├── App.tsx                     # chat shell + @a2ui/react rendering (M2;
+│   │                               #   single component so far, deliberately
+│   │                               #   not split into chat/a2ui/ subfolders
+│   │                               #   until mcp-app-host/ in M4 adds real
+│   │                               #   complexity worth separating)
+│   └── mcp-app-host/               # M4: our Host impl: iframe sandbox, CSP,
 │                                   #   postMessage bridge (adapted from
 │                                   #   ext-apps/examples/basic-host)
 └── tests/

@@ -1,16 +1,23 @@
-"""M1 (Foundational): a minimal LangGraph app whose only purpose is to prove
-cross-process persistence via SqliteSaver — the foundation US5 (Session
-Resume) depends on. The real interview/research/transaction nodes land in
-M2+ (see specs/001-ai-car-matchmaker/tasks.md).
+"""LangGraph app. `compiled_graph`/`GraphState`/`build_graph` are the
+minimal M1 scaffold that proves cross-process persistence via SqliteSaver
+(kept as-is — test_graph_persistence.py depends on this exact shape, and a
+fast, LLM-free graph is the right tool for testing the persistence layer in
+isolation). `build_interview_agent` (M2) is the real DeepAgents-based agent
+that actually runs the interview phase.
 """
 from __future__ import annotations
 
 from typing import TypedDict
 
+from deepagents import create_deep_agent
+from deepagents.graph import DeepAgentState
 from langgraph.checkpoint.sqlite import SqliteSaver
 from langgraph.graph import END, START, StateGraph
 
+from agent.llm import build_model
+from agent.prompts import INTERVIEW_SYSTEM_PROMPT
 from agent.state import SessionState
+from agent.tools import save_interview_state
 
 
 class GraphState(TypedDict):
@@ -20,9 +27,7 @@ class GraphState(TypedDict):
 
 
 def _touch(state: GraphState) -> GraphState:
-    """Placeholder node: M1 proves persistence, not behavior. Real phase
-    nodes (interview/research/form/payment) replace this in M2-M4.
-    """
+    """Placeholder node: proves persistence, not behavior."""
     return state
 
 
@@ -40,3 +45,25 @@ def compiled_graph(checkpointer):
 
 def new_session_state(session_id: str) -> dict:
     return SessionState(session_id=session_id).model_dump(mode="json")
+
+
+class CarMatchmakerState(DeepAgentState):
+    """DeepAgentState plus our domain SessionState, carried alongside the
+    message history in the same checkpointed graph state.
+    """
+    session: dict
+
+
+def build_interview_agent(checkpointer):
+    """The real INTERVIEWING-phase agent (US1). Later phases (research,
+    form-fill, payment) extend this same pattern in M3/M4 with their own
+    tool sets, gated by SessionState.available_tools() per Constitution
+    Principle II.
+    """
+    return create_deep_agent(
+        model=build_model(),
+        tools=[save_interview_state],
+        system_prompt=INTERVIEW_SYSTEM_PROMPT,
+        state_schema=CarMatchmakerState,
+        checkpointer=checkpointer,
+    )

@@ -11,11 +11,16 @@ __pycache__/
 node_modules/
 dist/
 
-# Env / secrets
+# Env / secrets -- .env.example is a template with no real values and
+# must stay tracked; everything else matching .env* is excluded.
 .env
 .env.*
+!.env.example
 *.sqlite
 *.db
+
+# Frontend build artifacts
+*.tsbuildinfo
 
 # OS
 .DS_Store

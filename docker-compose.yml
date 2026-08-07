@@ -10,6 +10,13 @@ services:
     build: ./agent-backend
     ports:
       - "8000:8000"
+    env_file:
+      - path: ./agent-backend/.env
+        required: false
+    environment:
+      - PHOENIX_COLLECTOR_ENDPOINT=http://phoenix:4317
+    volumes:
+      - agent-backend-data:/app/data
     depends_on:
       - mcp-services
       - phoenix
@@ -26,3 +33,6 @@ services:
       # phoenix-mind-service container on the dev host using 6006/4317
       - "16006:6006"
       - "14317:4317"
+
+volumes:
+  agent-backend-data:

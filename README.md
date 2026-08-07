@@ -11,9 +11,10 @@ Built for the Amulate Summer Hackathon 2026.
 ## Status
 
 M0 (scaffolding) + M1 (foundational) + M2 (conversational interview, User
-Story 1) + M2.5 (audit remediation) complete — **47 automated tests**
-(39 `agent-backend` + 8 `mcp-services`, excluding credential- and
-Phoenix-gated ones), plus live end-to-end verification in a real browser
+Story 1) + M2.5 (audit remediation) complete — **53 automated tests**, of
+which **47 run with no external setup at all** (39 `agent-backend` +
+8 `mcp-services`); the remaining 6 need a live LLM key and/or a running
+Phoenix and auto-skip without them. Plus live end-to-end verification
 against a real Docker Compose build. See
 [`specs/001-ai-car-matchmaker/`](specs/001-ai-car-matchmaker/) for the full
 spec-driven-development trail:

@@ -82,8 +82,49 @@ def test_update_reflects_partially_filled_slots():
 def test_no_hallucination_values_come_only_from_interview_state():
     """Constitution Principle I: every rendered value must trace back to
     the InterviewState fields, never something the renderer invents.
+
+    The renderer may *format* (see _display), but the underlying number
+    must survive round-tripping unchanged -- formatting must never alter
+    the value itself.
     """
     interview = InterviewState(budget_max=25000.0)
     msg = build_interview_surface_update(interview)
     slots_by_key = {s["key"]: s for s in msg["updateDataModel"]["value"]}
-    assert slots_by_key["budget_max"]["value"] == str(interview.budget_max)
+    assert float(slots_by_key["budget_max"]["value"]) == interview.budget_max
+
+
+def test_enum_slots_render_their_value_not_the_python_repr():
+    """Caught in live verification against the running stack: because
+    TransactionType is a (str, Enum) and Enum overrides __str__, the
+    progress surface was showing the user "TransactionType.BUY" instead of
+    "buy".
+    """
+    from agent.state import TransactionType
+
+    interview = InterviewState(transaction_type=TransactionType.BUY)
+    msg = build_interview_surface_update(interview)
+    slots = {s["key"]: s for s in msg["updateDataModel"]["value"]}
+    assert slots["transaction_type"]["value"] == "buy"
+
+
+def test_whole_dollar_budgets_render_without_a_trailing_decimal():
+    interview = InterviewState(budget_max=30000.0)
+    msg = build_interview_surface_update(interview)
+    slots = {s["key"]: s for s in msg["updateDataModel"]["value"]}
+    assert slots["budget_max"]["value"] == "30000"
+
+
+def test_no_rendered_slot_value_leaks_a_python_repr():
+    """Blanket guard: nothing user-facing should carry a class name or an
+    object repr, whatever type a slot happens to hold.
+    """
+    from agent.state import TransactionType
+
+    interview = InterviewState(
+        use_case="commute", category="Sedan", budget_max=25000.0,
+        transaction_type=TransactionType.RENT, target_date="2026-09-01",
+    )
+    msg = build_interview_surface_update(interview)
+    for slot in msg["updateDataModel"]["value"]:
+        assert "object at 0x" not in slot["value"]
+        assert "TransactionType." not in slot["value"]

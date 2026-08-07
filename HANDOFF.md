@@ -87,10 +87,10 @@ M5   ⬜ Evals (observability itself is now wired, M2.5/T051)
 M6   ⬜ Hardening, E2E tests, README finalization, deck, demo video
 ```
 
-**Test suite**: 47 pass without any external setup.
-- `agent-backend`: 39 pass unconditionally + 3 auto-skip (gated on live LLM
-  credentials or a running Phoenix)
-- `mcp-services`: 8 pass
+**Test suite**: 53 total. 47 pass with **no external setup**; all 53 pass
+with a live LLM key and Phoenix running (verified 2026-08-08).
+- `agent-backend`: 39 unconditional, 45 with Phoenix + LLM key
+- `mcp-services`: 8
 
 ⚠️ The credential gate checks key **presence** only. With a key set but out
 of quota, the live tests **fail** rather than skip. Check the provider

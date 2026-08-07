@@ -242,8 +242,11 @@ execution is inert and the host is untouched. `test_phase_gate.py` pins
 both the built-in set and the absence of `StateBackend.execute` so a
 dependency upgrade that widens the agent's reach fails loudly.
 
-**Checkpoint**: 47 automated tests (39 agent-backend + 8 mcp-services)
-excluding credential/Phoenix-gated ones, up from 30.
+**Checkpoint**: 53 automated tests, up from 30. 47 pass with no external
+setup (39 agent-backend + 8 mcp-services); all 53 pass with a live LLM key
+and Phoenix running — verified live, including 8 real spans landing in
+Phoenix for one session (LLM calls + the `save_interview_state` tool call),
+where the pre-M2.5 code produced zero.
 
 ---
 

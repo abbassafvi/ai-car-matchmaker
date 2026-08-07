@@ -22,6 +22,8 @@ catalog components).
 """
 from __future__ import annotations
 
+from enum import Enum
+
 from agent.state import InterviewState
 
 CATALOG_ID = "https://a2ui.org/specification/v0_9/catalogs/basic/catalog.json"
@@ -38,6 +40,27 @@ REQUIRED_SLOTS: list[tuple[str, str]] = [
 ]
 
 
+def _display(value) -> str:
+    """Render a slot value as the user should see it.
+
+    Two traps this exists to avoid, both caught in live verification:
+
+    - `TransactionType` is a `(str, Enum)`, and Enum overrides `__str__`, so
+      plain `str()` yields "TransactionType.BUY" -- an internal repr leaking
+      onto the user's screen. Use `.value` ("buy").
+    - Budgets arrive as floats, so `str()` yields "30000.0". Show whole
+      dollars as whole numbers.
+
+    Note this only ever *formats* a value already present in state; it never
+    substitutes or invents one (Constitution Principle I).
+    """
+    if isinstance(value, Enum):
+        return str(value.value)
+    if isinstance(value, float) and value.is_integer():
+        return str(int(value))
+    return str(value)
+
+
 def _slot_rows(interview: InterviewState) -> list[dict]:
     rows = []
     for key, label in REQUIRED_SLOTS:
@@ -46,7 +69,7 @@ def _slot_rows(interview: InterviewState) -> list[dict]:
             "key": key,
             "label": label,
             "filled": value is not None and value != "",
-            "value": "" if value is None else str(value),
+            "value": "" if value is None else _display(value),
         })
     return rows
 

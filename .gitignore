@@ -1,6 +1,5 @@
 # Spec-kit's own security note: agent folders can hold credentials/local state
 .claude/
-.specify/.gitignore
 
 # Python
 __pycache__/

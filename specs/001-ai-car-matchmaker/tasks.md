@@ -20,16 +20,20 @@ for tracking/commit-cadence purposes.
 ## Phase 1: Setup — M0
 
 - [x] T001 Initialize spec-kit (`.specify/`) and this spec/plan/tasks set
-- [ ] T002 [P] Create repo skeleton: `agent-backend/`, `mcp-services/`,
+- [x] T002 [P] Create repo skeleton: `agent-backend/`, `mcp-services/`,
       `mcp-apps-ui/`, `frontend/` per plan.md's Project Structure
-- [ ] T003 [P] `docker-compose.yml` stub with 4 services (frontend,
+- [x] T003 [P] `docker-compose.yml` stub with 4 services (frontend,
       agent-backend, mcp-services, phoenix) — health-check only, no logic yet
-- [ ] T004 [P] Root `README.md` with run instructions (updated incrementally
+- [x] T004 [P] Root `README.md` with run instructions (updated incrementally
       per milestone) and `.gitignore` (must exclude `.claude/` credentials
       per spec-kit's own security note)
-- [ ] T005 Commit + push M0 to `origin main`
+- [x] T005 Commit + push M0 to `origin main`
 
-**Checkpoint**: `docker compose up` boots 4 empty-but-healthy containers.
+**Checkpoint**: `docker compose up` boots 4 empty-but-healthy containers —
+verified live (all 4 respond: frontend 200, agent-backend/mcp-services
+health JSON, Phoenix UI 200). Host ports for Phoenix were remapped to
+16006/14317 to avoid a collision with an unrelated pre-existing container
+on the dev host; internal container ports are untouched.
 
 ---
 

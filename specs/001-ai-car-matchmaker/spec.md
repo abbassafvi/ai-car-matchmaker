@@ -268,3 +268,10 @@ captured slots intact — not a restarted interview.
 - The underlying LLM API (for DeepAgents) is reachable from the deployment
   environment; API key management is out of scope for this spec and
   handled via standard environment configuration.
+- The mock dataset generator produces a full brand × category cross-product
+  (every brand appears in every category) to guarantee FR-011/SC-006
+  deterministically, rather than hand-curating realistic brand-category
+  pairings (e.g. no attempt to omit implausible combinations like a
+  minivan from a sports-only brand). This trades a small amount of
+  real-world realism for guaranteed, reproducible constraint compliance —
+  acceptable for a hackathon demo dataset.

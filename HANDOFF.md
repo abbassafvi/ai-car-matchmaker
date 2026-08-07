@@ -5,8 +5,8 @@ continue this project with zero re-discovery and without repeating mistakes
 already made and fixed. Read this file first, then the files listed in
 [§13 Required reading](#13-required-reading).
 
-**Last updated**: 2026-08-08, after **M3 Phase B** shipped and was pushed
-(`c6915fd`). M3 is *in progress* — Phases A and B are done, C–F are not.
+**Last updated**: 2026-08-08, after the **Phase C pre-flight audit** (the
+fourth). M3 is *in progress* — Phases A and B are done, C–F are not.
 
 > **Treat every claim in this file as a claim, not as truth.** Three separate
 > audits have now found docs asserting behaviour the code did not have. The
@@ -117,6 +117,7 @@ account before assuming a code bug.
 
 **Git log** (main, clean, synced with origin):
 ```
+2fa9fcf  docs: bring HANDOFF/README/plan/tasks up to M3 Phase B state
 c6915fd  M3 Phase B (T020, T023): marketplace MCP server over Streamable HTTP
 dea1576  M3 Phase A: async agent path, provider-aware token caps, doc corrections
 c208807  docs: rewrite HANDOFF for M2.5 state and flag M3's open quota decision
@@ -149,6 +150,25 @@ have.** Each was found by running things, never by reading.
 | HANDOFF — "the interview agent keeps running after the phase flips" | False. `api/main.py` *does* switch agents on the persisted phase. The real gaps were that the RESEARCHING agent bound zero domain tools, and nothing triggers research without another user message. |
 | HANDOFF layout note — several dirs "don't exist yet" | They exist on disk (empty, so git doesn't track them). |
 
+### Found by the Phase C pre-flight audit (fixed in this pass)
+
+**This one ran the other way: the docs *understated* the code.** Worth
+weighing, because a reader who has absorbed the three rows above will be
+scanning for overclaims and can walk straight past an underclaim.
+
+| Was claimed | Reality found |
+|---|---|
+| plan.md — the `openai_compatible` path "is **not verified end-to-end**" | False since Phase A. It is the *active dev provider*, running Groq, verified through the real agent path — as tasks.md and this file both already said. plan.md was the lone holdout, and it is the doc a reader is pointed at for architecture. |
+| plan.md row IV — "**nothing emits** the `<untrusted_listing_data>` delimiters" | True when written at M3 start, false since Phase B's `store.wrap_untrusted()`. Re-verified live: `ADV-0001`'s description reaches the agent *inside* the delimiters. Row now PARTIAL for the right reason — wrapping real, T029 behavioural proof still owed. |
+| README — "LangGraph + SqliteSaver" | `AsyncSqliteSaver` since Phase A. plan.md and this file were updated; README was not. |
+| plan.md vs tasks.md — where the MCP client lives | plan.md said `agent/tools.py`, tasks.md T024 said the FastAPI lifespan. Two docs assigning unwritten code to different homes. Resolved to the lifespan. |
+
+Also found, and **not** a doc problem — a real repo defect nobody had hit:
+**neither test suite collected under a bare `pytest tests/`** (8 collection
+errors in `agent-backend`, 1 in `mcp-services`). Both only ever worked
+because `python -m pytest` puts the cwd on `sys.path`. Fixed with a
+`conftest.py` per service root.
+
 **Lessons worth keeping:**
 1. A test asserting *a prompt contains a rule* proves the rule was written,
    not that it is enforced. Grep for the thing the rule describes.
@@ -159,6 +179,14 @@ have.** Each was found by running things, never by reading.
 4. Run the live stack and query Phoenix for actual spans.
 5. When a test fails against real data, suspect the data/spec before the test.
    That is how the dataset bug in §3b was found.
+6. **Staleness runs both ways.** Three audits found docs overclaiming, so
+   the fourth nearly missed two docs *underclaiming* — describing
+   limitations the code had outgrown two milestones earlier. An underclaim
+   costs a session re-solving a solved problem, which is the same waste in
+   the opposite direction. Check both.
+7. **Run the suite the way a stranger would**, not only the way the README
+   says. `pytest tests/` and `python -m pytest tests/` were not equivalent
+   here for four milestones.
 
 ### 3b. The dataset could not satisfy the spec (fixed in Phase B)
 
@@ -291,10 +319,14 @@ docker compose up --build
 #   mcp-services    http://localhost:8100/health   <- real MCP server now
 #   phoenix         http://localhost:16006
 
-# Tests (run the FULL suite together, never file-by-file — see §8.20)
+# Tests (run the FULL suite together, never file-by-file — see §8.31)
 source .venv/bin/activate
 (cd mcp-services  && python -m pytest tests/ -q)   # 35 pass, no setup needed
 (cd agent-backend && python -m pytest tests/ -q)   # 42 pass, 3 skip
+# Bare `pytest tests/` also works now. It did NOT before the Phase C
+# audit -- both suites died at collection, and only `python -m pytest`
+# worked, because it puts the cwd on sys.path. Fixed with a conftest.py
+# per service root; don't delete them.
 
 # With live LLM (see §5) and Phoenix:
 docker compose up -d phoenix
@@ -339,6 +371,7 @@ python mcp-services/data/generate_listings.py
 | `agent/render_a2ui.py` | `build_interview_surface_init()`/`_update()`, `_display()`. **A2UI v0.9**. **Phase D adds catalogue + reasoning surfaces here** |
 | `api/main.py` | FastAPI. `GET /health`, `WS /ws/{session_id}`. **AsyncSqliteSaver lifespan, `agent.ainvoke`, `aget_state`**, `message_text()` |
 | `observability/otel_setup.py` | `setup_observability()` → `phoenix.otel.register(..., protocol="grpc", auto_instrument=True)` |
+| `conftest.py` | Puts the service root on `sys.path` so the suite collects under a bare `pytest`, not only `python -m pytest`. Added by the Phase C audit — see §3 |
 | `tests/` | **11 modules, 45 tests**: `test_state`(6), `test_tools`(5), `test_graph_persistence`(2), `test_render_a2ui`(8), `test_chat_endpoint`(3), `test_chat_endpoint_error_handling`(1), `test_interview_agent`(1), `test_otel_setup`(1), `test_phase_gate`(10), `test_observability_wiring`(2), `test_message_text`(6) |
 
 ### mcp-services (Python) — **rewritten in M3 Phase B**
@@ -351,6 +384,7 @@ python mcp-services/data/generate_listings.py
 | `tests/test_generate_listings.py` | 8 tests incl. SC-006 compliance + committed-file guard |
 | `tests/test_marketplace.py` | **18 tests** — T020 hard filters |
 | `tests/test_marketplace_server.py` | **9 tests** — MCP tool contract (structured_content shape, untrusted wrapper, error path) |
+| `conftest.py` | Same role as agent-backend's. Replaced the per-file `sys.path.insert` hacks in two test modules, which had left `test_generate_listings` broken |
 | `booking/`, `payment/` | Empty dirs (M4) |
 | `app_stub.py` | **DELETED** in Phase B |
 
@@ -394,7 +428,21 @@ Every one is verified, not assumed.
    key. Both our tools therefore return a **named object**
    (`{listings, count, query}` and `{listing}`). Got this wrong once.
 7. A **fresh MCP session is opened per tool call** (documented adapter
-   behaviour), ~28 ms locally. Fine at demo scale.
+   behaviour), ~28 ms locally (re-measured 23 ms). Fine at demo scale.
+7a. **A failed tool call does not raise into the agent.** An unknown listing
+   id comes back as a `ToolMessage` with `status="error"` and the error text
+   in `.content` — *not* an exception. So `try/except` around `ainvoke` will
+   never see it, and code that assumes "no exception ⇒ the search worked"
+   is wrong. Verified against the live Phase B server.
+7b. **`ToolMessage.artifact` survives the checkpointer.** T025's whole
+   design — deterministic ranking read from the artifact rather than from
+   the model's prose — rests on this, and nothing in the repo had ever
+   checkpointed an artifact-carrying ToolMessage (`save_interview_state`
+   returns a bare one). Verified: written through `AsyncSqliteSaver` and
+   re-read on a **fresh connection**, the artifact compares equal and
+   `price`/`year` are still `int`, not stringified. Ranking from the
+   artifact is safe. (Persisting the derived `RankedRecommendation`s is
+   still the right call — see tasks.md T025(iii).)
 
 ### LLM provider
 8. **Gemini 3.x + OpenAI-compat = broken tool calling** (`thought_signature`
@@ -527,12 +575,25 @@ tools = await client.get_tools()      # async!
 - Add `langchain-mcp-adapters>=0.3.2,<0.4` **and** `mcp>=1.24,<2` to
   `agent-backend/requirements.txt` (currently only a TODO comment).
   It is already installed in `.venv`.
-- `MCP_MARKETPLACE_URL` is already passed by `docker-compose.yml`.
+- `MCP_MARKETPLACE_URL` is already passed by `docker-compose.yml`, and as of
+  now is referenced by **no code at all** — grep confirms it appears only in
+  compose and in docs.
 - Tool discovery is async and happens at startup → fetch once in the FastAPI
-  lifespan and inject into `TOOL_REGISTRY` **before** `PhaseAgentRegistry` is
-  constructed (agents fix their tools at construction, finding 13).
+  lifespan, **before** `PhaseAgentRegistry` is constructed (agents fix their
+  tools at construction, finding 13).
+- ⚠️ **Do not mutate the module-level `TOOL_REGISTRY` from the lifespan**,
+  which is what this section used to say. `test_phase_gate.py` asserts
+  against `bound & set(TOOL_REGISTRY)`, so a globally-mutated registry makes
+  that test mean one thing under pytest and another under the app. Pass the
+  discovered tools into `PhaseAgentRegistry.__init__` instead —
+  `TOOLS_BY_PHASE` stays the single gate definition (names), tool
+  *resolution* becomes injectable.
 - Must be **fail-soft** like tracing: mcp-services down should degrade
-  research, not kill the backend.
+  research, not kill the backend. ⚠️ But note `PhaseAgentRegistry` caches
+  agents for the process lifetime, so a discovery failure at startup leaves
+  RESEARCHING permanently toolless even after mcp-services recovers. Needs a
+  rebuild path or a documented "restart required", plus `mcp_connected` in
+  `/health` next to `tracing_enabled`.
 
 **T025 — RESEARCHING behaviour.** Two design decisions already taken:
 - **Ranking is deterministic Python, not the LLM.** A `rank()` function builds
@@ -544,18 +605,49 @@ tools = await client.get_tools()      # async!
   the interview turn, but nothing runs until the user sends another message —
   which contradicts spec.md US1 AS3 ("no further user prompt required to
   proceed"). Run research in the same turn the interview completes.
-- Register the MCP tools in `TOOL_REGISTRY`; the gate already **names**
-  `search_listings`/`get_listing_details` for `Phase.RESEARCHING`, so
-  `test_phase_gate.py` starts covering them automatically.
-- Consider passing deny-all `permissions=` to `create_deep_agent` (finding 12).
+- Hand the MCP tools to the registry (see T024 above); the gate already
+  **names** `search_listings`/`get_listing_details` for `Phase.RESEARCHING`,
+  so `test_phase_gate.py` starts covering them automatically.
+- Consider passing deny-all `permissions=` to `create_deep_agent` (finding
+  12) — re-verified present in deepagents 0.7.5, along with the exported
+  `FilesystemPermission`.
+
+🔴 **Settle this before writing T025 — it is the user's decision, not
+yours.** The RESEARCHING agent **cannot currently see the interview
+constraints**: `build_agent_for_phase` passes a static `system_prompt`, and
+`session` reaches graph state only (visible to tools via `InjectedState`,
+never to the model). But `RESEARCH_SYSTEM_PROMPT` instructs it to "search
+using the captured interview constraints". The only reason it would work is
+that the interview transcript shares the thread — so the model would
+*recall* the budget rather than read it, which is the failure class
+Principle I exists to eliminate, and it burns prompt tokens against Groq's
+8k TPM ceiling. Options, with the trade-off stated honestly:
+
+| Option | Gains | Costs |
+|---|---|---|
+| **Code-driven first search** (recommended) — our node calls `search_listings` with `session["interview"]` values, model only narrates + drives relaxation | Principle I true by construction on the headline path; one fewer LLM round trip; smallest prompt | First hop is less "agentic", which rubs against hard requirement #1's framing |
+| **Model-driven search** — inject interview slots into the turn as a delimited context block | Model stays in the driving seat throughout | Grounding depends on the model copying numbers correctly; more tokens |
+
+Two more T025-owned gaps found in the same audit:
+- **Nothing transitions RESEARCHING → RESULTS_READY**, and nothing writes
+  `SessionState.candidate_listings` / `.recommendations` — both fields are
+  defined and entirely unused. `save_interview_slots` is the only phase
+  mutation anywhere in the codebase. Principle II says this must be
+  code-enforced, not a model decision.
+- **The auto-kickoff breaks the WS send shape.** `chat_ws` picks one agent
+  from the pre-turn phase, runs one `ainvoke`, sends one chat + one a2ui
+  message. Research-in-the-same-turn needs two invocations and several
+  sends per inbound message. Restructure the send path in Phase C —
+  T026's reasoning-steps surface must stream from inside that loop, so
+  deferring it means writing this code twice.
 
 ### Then
 
 | Phase | Task | Work |
 |---|---|---|
 | D | T026 | `render_a2ui.py`: reasoning-steps surface (`List` of steps, emitted during search) + catalogue surface (`Column` of `Card` → `Text`/`Image`/`Button`). Fed from the artifact only |
-| D | T022 | Snapshot test: A2UI catalogue values **exactly equal** artifact values (Principle I / SC-002) |
-| E | T028 | Frontend: layout the two new surfaces; `MessageProcessor` action handler + new `{"type":"action"}` WS message (finding 20) |
+| D | T022 | Snapshot test: A2UI catalogue values **exactly equal** artifact values (Principle I / SC-002). **Also assert `<untrusted_listing_data>` appears in no rendered string** — `wrap_untrusted` rewrites `description` for every consumer including the ranker's artifact, and store.py's "the delimiters never reach a screen" is currently enforced by a code comment only |
+| E | T028 | Frontend: layout the two new surfaces; `MessageProcessor` action handler + new `{"type":"action"}` WS message (finding 20). **Plus a backend half nobody had assigned: `select_listing` does not exist.** The gate has named it since M2.5, no module implements it, no task created it — and Principle II's own example is `open_booking_form` gated on a selection, so **M4a cannot gate on something nothing can record** |
 | F | T029 | **Security test**: the 3 `ADV-*` listings cause **zero** behavioural deviation (Principle IV) |
 | F | T021 | Integration test: zero-match → agent **relaxes a constraint and says so** |
 | — | T027 | `mcp-apps-ui/listing-detail/` — **recommended deferred past M4a/M4b**, it is the explicitly *additive secondary* surface while M4 is a hard requirement |
@@ -584,7 +676,10 @@ since an injection result is only evidence for the model it ran on.
 - **`frontend/src/{chat,a2ui,mcp-app-host}/` are empty** — M2 put everything in
   `App.tsx`. Split when M4's host adds real complexity.
 - **`agent-backend/requirements.txt` still lists the MCP deps as a comment** —
-  T024 must promote them to real entries.
+  T024 must promote them to real entries (**both** of them; the comment
+  previously named only the adapter and omitted the `mcp>=1.24,<2` pin).
+- **`select_listing` is a phase-gate entry with no implementation and, until
+  now, no owning task** — assigned to T028(b). M4a depends on it.
 - 🔴 **Rotate all three API keys** (Gemini, Groq, NVIDIA NIM) after the demo —
   all have been pasted into chat transcripts. None was ever committed.
 
@@ -645,8 +740,12 @@ Then, before writing M3 Phase C code:
 > This is the Amulate Summer Hackathon 2026 "AI Car Matchmaker" project.
 > M0–M2.5 are complete. **M3 (User Story 2) is in progress**: Phase A (async
 > agent path) and Phase B (T020/T023, marketplace MCP server) are done, tested
-> and pushed to `main` (`c6915fd`). **Continue from M3 Phase C (T024 + T025)**,
+> and pushed to `main`. **Continue from M3 Phase C (T024 + T025)**,
 > described in HANDOFF §10.
+>
+> Note that §10 carries a 🔴 **open decision I have to make before you write
+> T025** — whether the first marketplace search is code-driven or
+> model-driven. Put the recommendation to me; don't pick for me.
 >
 > Do **not** write code immediately. First confirm you have full context and
 > tell me anything in the docs that looks wrong, stale, or self-contradictory —

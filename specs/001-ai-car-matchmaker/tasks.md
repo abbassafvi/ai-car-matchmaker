@@ -319,6 +319,41 @@ on a fresh connection, 16 real spans in Phoenix).
   and has no `execute`. M3 is when untrusted listing text first reaches the
   model, so re-evaluate whether those need constraining.
 
+### Phase C pre-flight audit (the fourth doc audit)
+
+Run before writing any Phase C code. Unlike the previous three, **every
+load-bearing technical claim it checked held up** — §8.1–8.7's adapter API,
+§8.19's A2UI catalog, §8.20's `MessageProcessor` signature, §8.12's
+`permissions=` parameter, the 80/35/42+3 test counts, and "AS1 now matches 4
+listings" were all re-verified against running code and are all correct.
+Two things it did find:
+
+**Repo defects, fixed in this pass:**
+- **Neither test suite collected under a bare `pytest tests/`** — 8
+  collection errors in `agent-backend`, 1 in `mcp-services`. They only ever
+  worked because `python -m pytest` puts the cwd on `sys.path` as a side
+  effect, so the documented invocation and the obvious one behaved
+  differently. Fixed with a `conftest.py` at each service root; the two
+  per-file `sys.path.insert` workarounds in `mcp-services/tests/` (which had
+  papered over it for 2 of 3 modules and left `test_generate_listings`
+  broken) are now redundant and were removed. Both suites verified green
+  under both invocations, counts unchanged.
+- `agent-backend/requirements.txt`'s M3 TODO named only
+  `langchain-mcp-adapters`, omitting the `mcp>=1.24,<2` pin that §8.4 says
+  both requirements files must carry.
+
+**Doc corrections** — recorded in plan.md's *Correction (M3 Phase C start)*.
+The novel finding is that this time the docs **understated** the code
+(plan.md still called the Groq path unverified and row IV still said nothing
+emits the untrusted-data delimiters, both fixed two milestones ago). Every
+prior audit found the opposite. A reader who has internalised "this repo's
+docs oversell" will mis-weigh these, so: **staleness runs both ways.**
+
+**Design gaps** found in the T024/T025 specifications themselves — these
+were holes in the *plan*, not in shipped code, and have been folded into the
+task entries below rather than listed here. T025(i) is a 🔴 **blocking open
+decision for the user** and should be settled before Phase C starts.
+
 ### Tests for User Story 2
 
 - [x] T020 [P] [US2] Unit test: `search_listings` hard filters (category,
@@ -340,7 +375,15 @@ on a fresh connection, 16 real spans in Phoenix).
 - [ ] T021 [P] [US2] Integration test: zero-match query triggers constraint
       relaxation messaging, not fabricated results — `agent-backend/tests/test_research.py`
 - [ ] T022 [P] [US2] Snapshot test: A2UI catalogue JSON values equal source
-      tool-call record values exactly (Principle I / SC-002)
+      tool-call record values exactly (Principle I / SC-002).
+      **Also assert `<untrusted_listing_data>` appears in no rendered
+      string.** `store.wrap_untrusted()` rewrites `description` for *every*
+      consumer, including the artifact the deterministic ranker reads, so the
+      delimiters are one careless `Text` binding away from a user's screen.
+      store.py's claim that this cannot happen ("the catalogue renders
+      brand/model/year/price/specs, never listing prose") is currently
+      enforced by a code comment and nothing else — which is precisely the
+      pattern §3's lesson 1 warns about.
 
 ### Implementation for User Story 2
 
@@ -371,11 +414,34 @@ on a fresh connection, 16 real spans in Phoenix).
       "url": MCP_MARKETPLACE_URL}})` then `await client.get_tools()`.
       Remaining work: promote `langchain-mcp-adapters>=0.3.2,<0.4` and
       `mcp>=1.24,<2` from a comment to real entries in
-      `agent-backend/requirements.txt`; fetch tools **once in the FastAPI
-      lifespan** and inject into `TOOL_REGISTRY` *before* `PhaseAgentRegistry`
-      is built (agents fix their tools at construction); make it fail-soft so
-      mcp-services being down degrades research rather than killing the
-      backend. `MCP_MARKETPLACE_URL` is already passed by docker-compose.
+      `agent-backend/requirements.txt` (both — see the comment there for why
+      the `mcp` pin is not optional); fetch tools **once in the FastAPI
+      lifespan**, *before* `PhaseAgentRegistry` is built (agents fix their
+      tools at construction); make it fail-soft so mcp-services being down
+      degrades research rather than killing the backend.
+      `MCP_MARKETPLACE_URL` is already passed by docker-compose and is, as
+      of Phase C start, still referenced by **no code**.
+      **Three constraints added by the pre-Phase-C audit:**
+      (a) **Do not mutate the module-level `TOOL_REGISTRY` dict from the
+      lifespan.** `test_phase_gate.py` asserts against
+      `bound & set(TOOL_REGISTRY)`, so a registry that is populated only when
+      MCP discovery happens to have run makes the same test mean different
+      things under pytest and under the app. Pass the discovered tools into
+      `PhaseAgentRegistry.__init__` instead: `TOOLS_BY_PHASE` stays the one
+      gate definition (names), and tool *resolution* becomes injectable and
+      explicitly testable.
+      (b) **Fail-soft as originally worded does not recover.**
+      `PhaseAgentRegistry` caches each agent for the process lifetime, so if
+      discovery fails at startup the RESEARCHING agent is built with zero
+      domain tools and stays that way even after mcp-services comes back.
+      Needs either an explicit rebuild path or a documented "restart
+      required", plus an `mcp_connected` field in `/health` alongside
+      `tracing_enabled` so the degraded state is visible rather than
+      presenting as "the agent just doesn't search".
+      (c) **A failed tool call does not raise.** Verified against the live
+      Phase B server: an unknown listing id comes back as a `ToolMessage`
+      with `status="error"` and the message in `.content`, *not* as an
+      exception. `try/except` around `ainvoke` will never see it.
 - [ ] T025 [US2] `agent-backend/agent/graph.py`: RESEARCHING phase behaviour
       (search → rank → reasoning), RESULTS_READY transition. Two decisions
       already taken: **(a) ranking is deterministic Python, not the LLM** —
@@ -385,11 +451,62 @@ on a fresh connection, 16 real spans in Phoenix).
       TPM ceiling; **(b) research must auto-kick-off** in the same turn the
       interview completes — today the phase flips but nothing runs until the
       user sends another message, contradicting spec.md US1 AS3 ("no further
-      user prompt required to proceed"). Register the MCP tools in
-      `TOOL_REGISTRY`; the gate already names them, so `test_phase_gate.py`
-      starts covering them automatically. Consider passing deny-all
-      `permissions=` to `create_deep_agent` (Principle IV; note it does not
-      reduce token cost — the schemas stay bound).
+      user prompt required to proceed"). Hand the MCP tools to the registry
+      (T024(a)); the gate already names them, so `test_phase_gate.py` starts
+      covering them automatically. Consider passing deny-all `permissions=`
+      to `create_deep_agent` (Principle IV; verified present in deepagents
+      0.7.5 along with the exported `FilesystemPermission` — but note it is a
+      runtime deny and does not reduce token cost, the schemas stay bound).
+
+      **Four gaps found by the pre-Phase-C audit, all owned by this task:**
+
+      (i) 🔴 **OPEN DECISION — the RESEARCHING agent cannot see the interview
+      constraints.** `build_agent_for_phase` passes a *static* `system_prompt`
+      and `session` reaches graph state only, where `InjectedState` exposes it
+      to tools but never to the model. Yet `RESEARCH_SYSTEM_PROMPT` says
+      "Search the marketplace using the captured interview constraints". The
+      only reason it would work at all is that the interview transcript shares
+      the thread — i.e. the model would *recall* the budget rather than read
+      it, which is the exact failure class Principle I exists to eliminate,
+      and it spends prompt tokens against Groq's 8k TPM ceiling. Two ways out,
+      **user decision required before implementing**:
+        - *Code-driven first search* (recommended): call `search_listings`
+          from our own node using `session["interview"]` values, then give the
+          model the artifact only to narrate and to drive follow-up/relaxation
+          searches. Principle I becomes true by construction on the headline
+          path and one LLM round trip disappears. Cost: the first hop is less
+          "agentic", against hard requirement #1's framing.
+        - *Model-driven search*: inject the interview slots into the turn as
+          a structured, delimited context block. Keeps the model in the
+          driving seat; keeps the grounding claim resting on the model
+          copying numbers correctly.
+
+      (ii) **Nothing transitions RESEARCHING → RESULTS_READY, and nothing
+      writes results to state.** `save_interview_slots` is the only phase
+      mutation that exists anywhere in the codebase, and
+      `SessionState.candidate_listings` / `.recommendations` are both defined
+      and entirely unused. Per Principle II this transition must be
+      code-enforced, not a model decision.
+
+      (iii) **Persist the rankings, do not recompute them.** On reconnect
+      `chat_ws` replays only the interview surface. Once T026 adds a
+      catalogue, a resumed RESULTS_READY session (US5 / T041) renders empty
+      unless the ranked results live in `SessionState` rather than only in a
+      message artifact. This is a Phase C state-shape decision with a Phase E
+      symptom. **De-risked**: `ToolMessage.artifact` was verified to survive
+      an `AsyncSqliteSaver` write + fresh-connection read with numeric types
+      intact, so reading rank inputs back from the artifact is *possible* —
+      persisting the derived `RankedRecommendation`s is still the right call,
+      because re-deriving them on every reconnect makes the UI depend on
+      message history that may later be trimmed.
+
+      (iv) **The auto-kickoff breaks the WebSocket send shape.** `chat_ws`
+      picks one agent from the pre-turn phase, runs one `ainvoke`, and sends
+      exactly one chat + one a2ui message. Research-in-the-same-turn means
+      two agent invocations per inbound message and several outbound sends.
+      Restructure the send path here in Phase C — T026's reasoning-steps
+      surface has to stream from inside that loop, and retrofitting it in
+      Phase D means rewriting this code twice.
 - [ ] T026 [US2] `agent-backend/agent/render_a2ui.py`: reasoning-steps
       surface (distinct from catalogue) + catalogue surface, both fed from
       structured tool output only
@@ -399,7 +516,23 @@ on a fresh connection, 16 real spans in Phoenix).
       secondary* surface, while the booking-form and checkout MCP Apps are
       hackathon hard requirements #3 and #4.
 - [ ] T028 [US2] `frontend`: render reasoning-steps + catalogue surfaces;
-      wire listing selection back to the agent
+      wire listing selection back to the agent. Two halves, and the audit
+      found only one of them had an owner:
+      (a) *Frontend*: pass a global `ActionListener` as `MessageProcessor`'s
+      **2nd** constructor argument (`App.tsx:30` currently passes only
+      `[basicCatalog]`; signature re-verified against the installed
+      `@a2ui/web_core` v0.10.2 typings), and add an inbound `{"type":
+      "action"}` message to the WS contract — `chat_ws` currently `continue`s
+      on anything that is not `{"type": "chat"}`.
+      (b) *Backend — previously unassigned*: **`select_listing` does not
+      exist.** `TOOLS_BY_PHASE[RESULTS_READY]` has named it since M2.5, no
+      module implements it, and no task created it. It is a real dependency,
+      not a nicety: Constitution Principle II's own worked example is
+      `open_booking_form` gated on "a listing is selected", so **M4a/T035
+      cannot gate on a selection nothing can record**. Implement it here
+      (writes `SessionState.selected_listing_id`, transitions RESULTS_READY →
+      FORM_FILLING), or pull it forward into T025 if listing selection is
+      wanted before the frontend work lands.
 - [ ] T029 [US2] Security test: T011's seeded adversarial listings produce
       zero behavioral deviation — `agent-backend/tests/test_prompt_injection.py`
 

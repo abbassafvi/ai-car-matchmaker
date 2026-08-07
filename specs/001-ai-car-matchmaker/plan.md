@@ -36,11 +36,20 @@ React + Vite, `@a2ui/react` + `@a2ui/web_core` (v0_9 subpath —
 embed as originally planned; see M2 findings in tasks.md),
 `@modelcontextprotocol/ext-apps`
 
-**LLM Provider** (resolved M2, revised M2.5): Google Gemini via the native
-`langchain-google-genai` client. `agent/llm.py` selects a client from
-`LLM_PROVIDER` (`google` | `openai_compatible`), with `LLM_MODEL` /
-`LLM_API_KEY` / `LLM_BASE_URL` alongside it, so switching provider or model
-stays a config change. Default model `gemini-3.6-flash`.
+**LLM Provider** (resolved M2, revised M2.5, revised again M3 Phase A):
+`agent/llm.py` selects a client from `LLM_PROVIDER` (`google` |
+`openai_compatible`), with `LLM_MODEL` / `LLM_API_KEY` / `LLM_BASE_URL`
+alongside it, so switching provider or model stays a config change. Two
+providers are in use, for different jobs:
+
+- **Development runs on Groq** (`LLM_PROVIDER=openai_compatible`,
+  `LLM_BASE_URL=https://api.groq.com/openai/v1`,
+  `LLM_MODEL=openai/gpt-oss-120b`). Its free tier allows ~1000 requests/day
+  against Gemini's ~20, which is what makes M3's behavioural tests (T021,
+  T029) and the T046 eval run affordable rather than deferred.
+- **Gemini stays the demo/rehearsal provider** via the native
+  `langchain-google-genai` client, default `gemini-3.6-flash`. `google` is
+  still `agent/llm.py`'s built-in default provider.
 
 Why native rather than Gemini's OpenAI-compatibility endpoint, which would
 have been the smaller change: Gemini 3.x are thinking models whose function
@@ -53,14 +62,27 @@ missing a thought_signature`. Reproduced directly through
 interview turn. Every phase of this agent is tool-driven, so the compat
 path is unusable for Gemini 3.x.
 
-The `openai_compatible` path is retained for other providers (OpenRouter,
-NVIDIA NIM). It is **not verified end-to-end** — NVIDIA NIM's
-non-streaming `/chat/completions` did not respond from the dev environment,
-and large tool-laden requests hung even when streaming.
+The `openai_compatible` path was **verified end-to-end at M3 Phase A**
+against Groq, through the real agent path (`build_interview_agent` →
+`save_interview_state`): a two-turn tool-using conversation survives with
+correct overwrite-not-append semantics. That is the same multi-turn tool
+calling Gemini's compat endpoint and NVIDIA NIM both failed, so the path is
+no longer theoretical. (NVIDIA NIM itself remains unusable from this dev
+environment — its non-streaming `/chat/completions` did not respond, and
+large tool-laden requests hung even when streaming. OpenRouter's free tier
+is exhausted.)
 
-Operational constraint: the Gemini **free tier allows ~20 requests per day
-per model**, enough for a smoke test but not a live demo or an eval run
-(T046). A billed key is required before the demo.
+Operational constraints, per provider:
+
+- **Gemini** free tier allows ~20 requests/day/model — a smoke test, not a
+  live demo or an eval run. A billed key is required before the demo.
+- **Groq** rate-limits on **tokens per minute** (8000/min for
+  `openai/gpt-oss-120b`), not just requests, and the reservation counts
+  prompt + `max_tokens`. This is why `agent/llm.py` carries
+  `DEFAULT_MAX_TOKENS_BY_PROVIDER` (google 4096 / openai_compatible 1024):
+  measured on the real agent path, 4096 gave 39s and 68s turns where 1024
+  gave 2.2s and 1.7s. A 20-70s "hang" on Groq is retry backoff, not a dead
+  call.
 
 Credentials via `agent-backend/.env` (gitignored, never committed —
 `.env.example` documents the required keys).
@@ -100,7 +122,7 @@ mock listings
 | I. Grounded Recommendations | UI values sourced only from tool-call records, never LLM-retyped | PARTIAL — the deterministic rendering layer exists (`render_a2ui.py`, covered by `test_render_a2ui.py`), but so far it renders only interview slots the *user* supplied. No listing price/spec has ever reached the UI, because no tool returns listing data yet. The principle's actual subject matter is unproven until T022/T026 (M3) |
 | II. Explicit Phase Gating | Transactional tools unavailable outside their phase | PASS (since M2.5) — `TOOLS_BY_PHASE` in `agent/state.py` is the single gate definition, and `agent/graph.py` builds one agent per phase from it; covered by `test_phase_gate.py` |
 | III. Mock-Only Transactions | No real payment path exists | PENDING — nothing to enforce yet; `confirm_mock_payment` lands in M4b |
-| IV. Untrusted Data Boundary | Listing/user text never treated as instructions | PARTIAL — the *rule* is in every listing-facing prompt (`agent/prompts.py`), asserted by `test_phase_gate.py`. But **nothing emits the `<untrusted_listing_data>` delimiters the rule refers to**: the only two occurrences in the repo are the prompt that describes them and the test that checks the prompt describes them. M3 must wrap listing text at the tool-output boundary, then T029 supplies the behavioral proof against the seeded `ADV-*` probes |
+| IV. Untrusted Data Boundary | Listing/user text never treated as instructions | PARTIAL (improved in M3 Phase B) — the *rule* is in every listing-facing prompt (`agent/prompts.py`), and the delimiters it refers to are now genuinely emitted: `store.wrap_untrusted()` wraps each `description` server-side, at the tool-output boundary, before it can reach the model. Confirmed live that the `ADV-0001` payload arrives inside the delimiters via `langchain-mcp-adapters`. Still PARTIAL because what remains is the **behavioural** proof — T029 must show the three `ADV-*` probes cause zero deviation. A wrapper the model ignores is not a boundary |
 | V. Full Observability | Every call/transition traced | PASS (since M2.5) — `setup_observability()` is called from the FastAPI lifespan before any agent is built; covered by `test_observability_wiring.py` + `test_otel_setup.py` |
 
 ### Correction (M2.5)
@@ -132,6 +154,38 @@ The lesson generalises: a gate row is only meaningful against the *subject
 matter* of its principle, and a test that asserts a prompt contains a rule
 proves the rule was written, not that it is enforced.
 
+### Correction (M3 Phase C start)
+
+A fourth audit, run before Phase C. This one found the failure mode
+**inverted** — docs understating what the code does — which is worth
+recording because every previous instance ran the other way and a reader
+who has internalised "the docs oversell" will mis-weigh these.
+
+- **The LLM Provider section above said the `openai_compatible` path was
+  "not verified end-to-end".** False since M3 Phase A: it is the *active
+  development provider*, running Groq, verified through the real agent path
+  and recorded as such in both tasks.md's Phase 4 quota decision and
+  HANDOFF §5. plan.md was the only doc still carrying the old status, and
+  it was the one a reader is told to trust for architecture. Corrected
+  above, along with the missing Groq TPM constraint.
+- **Row IV still said "nothing emits the delimiters".** True when written
+  at M3 start; false since Phase B, which added `store.wrap_untrusted()`.
+  The row is now PARTIAL for the correct reason — the wrapping is real, the
+  behavioural proof (T029) is what is still owed. Verified live before
+  editing: the `ADV-0001` description arrives at the agent inside
+  `<untrusted_listing_data>` via `langchain-mcp-adapters`.
+- **The Project Structure block put "MCP client wiring" in `agent/tools.py`**,
+  while tasks.md T024 and HANDOFF §10 put it in the FastAPI lifespan. Two
+  docs specifying different homes for code that had not been written yet.
+  Resolved in favour of the lifespan (see the Project Structure note) —
+  discovery is async and must happen once, before `PhaseAgentRegistry`
+  fixes each agent's tools at construction.
+
+Fourth lesson, then: **staleness is a two-sided failure.** "Verify the docs
+against the code" has to include verifying that a doc is not still
+describing a limitation the code has since outgrown, because that costs a
+session re-solving a solved problem.
+
 Known deviation, accepted: `create_deep_agent` always installs
 `FilesystemMiddleware`, which binds nine built-in tools (`ls`, `read_file`,
 `write_file`, `edit_file`, `delete`, `glob`, `grep`, `execute`, `task`) in
@@ -162,7 +216,12 @@ agent-backend/                     # Python — DeepAgents orchestrator
 ├── agent/
 │   ├── graph.py                   # LangGraph app, phase gate, tool filtering
 │   ├── state.py                   # SessionState/InterviewState schemas (pydantic)
-│   ├── tools.py                   # save_interview_state + MCP client wiring
+│   ├── tools.py                   # locally-defined tools (save_interview_state).
+│   │                              #   NOT the MCP client: discovery is async and
+│   │                              #   happens once in api/'s FastAPI lifespan, then
+│   │                              #   the tools are handed to PhaseAgentRegistry,
+│   │                              #   which must have them before it constructs an
+│   │                              #   agent (DeepAgents fixes tools at construction)
 │   ├── render_a2ui.py             # deterministic domain object -> A2UI JSON
 │   └── prompts.py
 ├── api/                            # WebSocket/SSE chat endpoint (FastAPI)

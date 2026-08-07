@@ -32,10 +32,10 @@ spec-driven-development trail:
 
 ```
 frontend (React + Vite)          agent-backend (Python)         mcp-services (Python)
- ├─ A2UI renderer (@a2ui/react)  LangChain DeepAgents    ◄──►   marketplace / booking / payment
- └─ MCP-Apps host (iframes, M4)  LangGraph + SqliteSaver        MCP servers over Streamable HTTP
-        │                               │                              (M3+)
-        │ WebSocket                     ▼
+ ├─ A2UI renderer (@a2ui/react)  LangChain DeepAgents    ◄──►   marketplace ✅ (live)
+ └─ MCP-Apps host (iframes, M4)  LangGraph +                    booking / payment (M4)
+        │                        AsyncSqliteSaver               MCP over Streamable HTTP
+        │ WebSocket                     │
         └──────────────────►    Arize Phoenix (OTel traces)
 ```
 

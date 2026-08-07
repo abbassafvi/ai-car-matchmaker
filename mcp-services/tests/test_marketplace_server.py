@@ -9,17 +9,12 @@ during T023 and is now pinned here, because Constitution Principle I's
 whole implementation depends on reading structured tool output reliably.
 """
 import asyncio
-import json
-import sys
-from pathlib import Path
 
 import pytest
 from starlette.testclient import TestClient
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-
-from marketplace import store  # noqa: E402
-from marketplace.server import app, mcp  # noqa: E402
+from marketplace import store
+from marketplace.server import app, mcp
 
 
 def call(tool_name: str, **args):

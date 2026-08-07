@@ -5,14 +5,9 @@ dataset is what the MCP server actually serves and a separate test already
 guards it against generator drift. A filter bug that only shows up on real
 data is exactly the kind this milestone must not ship.
 """
-import sys
-from pathlib import Path
-
 import pytest
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-
-from marketplace import store  # noqa: E402
+from marketplace import store
 
 ALL = store.load_listings()
 

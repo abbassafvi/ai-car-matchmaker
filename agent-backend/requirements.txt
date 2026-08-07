@@ -14,5 +14,11 @@ pytest-asyncio>=1.4,<2
 httpx>=0.28,<0.29
 python-dotenv>=1.2,<2
 
-# Land in M3 (specs/001-ai-car-matchmaker/tasks.md):
-#   langchain-mcp-adapters
+# Land in M3 T024 (specs/001-ai-car-matchmaker/tasks.md). BOTH are needed,
+# not just the adapter: langchain-mcp-adapters 0.3.x requires mcp<2.0.0 and
+# mcp 2.0.0 is already on PyPI, so leaving `mcp` unpinned here would let a
+# fresh build split the two sides of the protocol across a major version.
+# mcp-services/requirements.txt already carries the same pin for the server
+# side; these two must stay in agreement.
+#   langchain-mcp-adapters>=0.3.2,<0.4
+#   mcp>=1.24,<2

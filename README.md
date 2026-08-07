@@ -10,7 +10,9 @@ Built for the Amulate Summer Hackathon 2026.
 
 ## Status
 
-Early scaffolding (M0). See [`specs/001-ai-car-matchmaker/`](specs/001-ai-car-matchmaker/)
+M0 (scaffolding) + M1 (foundational: mock dataset generator, session-state
+schemas, checkpointer persistence, Phoenix tracing) complete — 16 automated
+tests passing. See [`specs/001-ai-car-matchmaker/`](specs/001-ai-car-matchmaker/)
 for the full spec-driven-development trail:
 
 - [`spec.md`](specs/001-ai-car-matchmaker/spec.md) — user stories, requirements, success criteria
@@ -42,9 +44,23 @@ docker compose up --build
 | MCP services (health) | http://localhost:8100 |
 | Phoenix (traces UI) | http://localhost:16006 |
 
-Currently all services are M0 health-check stubs — real functionality
-lands milestone by milestone per `tasks.md`. This section will be updated
-as each milestone ships.
+Currently all *services* are M0 health-check stubs — the M1 foundational
+modules (dataset generator, state schemas, checkpointer, tracing) exist and
+are tested but aren't wired into the running containers yet; that lands in
+M2/M3 alongside the real agent and MCP server logic. This section will be
+updated as each milestone ships.
+
+## Running tests locally
+
+```bash
+python3 -m venv .venv && source .venv/bin/activate
+pip install -r agent-backend/requirements.txt -r mcp-services/requirements.txt
+
+(cd mcp-services && python -m pytest tests/ -v)
+(cd agent-backend && python -m pytest tests/ -v)   # otel test auto-skips
+                                                     # unless Phoenix is up:
+                                                     #   docker compose up -d phoenix
+```
 
 ## Tech stack
 

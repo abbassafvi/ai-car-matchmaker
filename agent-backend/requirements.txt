@@ -1,4 +1,10 @@
-# Placeholder for M0. Real dependencies land in M1/M2 per
-# specs/001-ai-car-matchmaker/plan.md ("Primary Dependencies"):
-#   langchain, deepagents, mcp, langchain-mcp-adapters, fastapi, uvicorn,
-#   arize-phoenix-otel, openinference-instrumentation-langchain
+pydantic>=2.13,<3
+langgraph>=1.2,<2
+langgraph-checkpoint-sqlite>=3.1,<4
+arize-phoenix-otel>=0.16,<0.17
+openinference-instrumentation-langchain>=0.1.70,<0.2
+pytest>=9,<10
+httpx>=0.28,<0.29
+
+# Land in M2 (specs/001-ai-car-matchmaker/tasks.md):
+#   deepagents, langchain-mcp-adapters, fastapi, uvicorn

@@ -1,2 +1,4 @@
-# Placeholder for M0. Real dependencies land in M1 per
-# specs/001-ai-car-matchmaker/plan.md: mcp (Python SDK), starlette, uvicorn
+pytest>=9,<10
+
+# MCP server dependencies land in M3 (see specs/001-ai-car-matchmaker/tasks.md, T023):
+#   mcp (Python SDK), starlette, uvicorn

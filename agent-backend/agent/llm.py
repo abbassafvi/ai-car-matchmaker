@@ -34,10 +34,34 @@ DEFAULT_PROVIDER = "google"
 DEFAULT_MODEL = "gemini-3.6-flash"
 DEFAULT_OPENAI_BASE_URL = "https://openrouter.ai/api/v1"
 
-# Gemini 3.x flash models spend part of the output budget on internal
-# reasoning before emitting a tool call, so a small cap can be consumed
-# before any visible output appears.
-DEFAULT_MAX_TOKENS = 4096
+# Output cap, per provider. This is not a cosmetic default -- it is a
+# latency control, and the right value differs by provider for opposite
+# reasons:
+#
+#   google: Gemini 3.x flash models spend part of the output budget on
+#     internal reasoning before emitting a tool call, so too small a cap is
+#     consumed before any visible output appears. 4096 is headroom.
+#
+#   openai_compatible: Groq rate-limits on TOKENS PER MINUTE (8000/min on
+#     openai/gpt-oss-120b), and the reservation counts prompt + max_tokens.
+#     DeepAgents binds 10 tool schemas into every request, so at 4096 a
+#     single interview turn reserves most of a minute's allowance and the
+#     next one 429s into retry backoff. Measured on the real agent path:
+#     4096 -> 39s and 68s per turn; 1024 -> 2.2s and 1.7s. Same model, same
+#     conversation, same day. Do not raise this without re-measuring.
+#
+# Both are floors, not ceilings: too low starves reasoning models of output
+# entirely (gpt-oss-120b at max_tokens=16 returns empty content, having
+# spent the whole budget on reasoning tokens).
+DEFAULT_MAX_TOKENS_BY_PROVIDER = {
+    "google": 4096,
+    "openai_compatible": 1024,
+}
+DEFAULT_MAX_TOKENS = DEFAULT_MAX_TOKENS_BY_PROVIDER["google"]
+
+
+def default_max_tokens(provider: str) -> int:
+    return DEFAULT_MAX_TOKENS_BY_PROVIDER.get(provider, DEFAULT_MAX_TOKENS)
 
 
 class LLMNotConfiguredError(RuntimeError):
@@ -53,7 +77,14 @@ def is_configured() -> bool:
     return bool(os.environ.get("LLM_API_KEY"))
 
 
-def build_model(max_tokens: int = DEFAULT_MAX_TOKENS):
+def build_model(max_tokens: int | None = None):
+    """Build the chat model for the configured provider.
+
+    `max_tokens=None` means "use the right default for this provider" (see
+    DEFAULT_MAX_TOKENS_BY_PROVIDER). `LLM_MAX_TOKENS` overrides it from the
+    environment so a rate-limit ceiling can be tuned without a code change,
+    matching how provider and model are already configured.
+    """
     api_key = os.environ.get("LLM_API_KEY")
     if not api_key:
         raise LLMNotConfiguredError(
@@ -63,6 +94,10 @@ def build_model(max_tokens: int = DEFAULT_MAX_TOKENS):
 
     provider = os.environ.get("LLM_PROVIDER", DEFAULT_PROVIDER).lower()
     model = os.environ.get("LLM_MODEL", DEFAULT_MODEL)
+
+    if max_tokens is None:
+        env_override = os.environ.get("LLM_MAX_TOKENS")
+        max_tokens = int(env_override) if env_override else default_max_tokens(provider)
 
     if provider == "google":
         from langchain_google_genai import ChatGoogleGenerativeAI

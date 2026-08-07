@@ -17,6 +17,11 @@ dist/
 .env.*
 !.env.example
 *.sqlite
+# AsyncSqliteSaver (M3) runs the checkpointer in WAL mode, which writes
+# these sidecars next to the db. They hold real session data, and "*.sqlite"
+# does not match them -- caught by `git status` after the first live run.
+*.sqlite-shm
+*.sqlite-wal
 *.db
 
 # Frontend build artifacts

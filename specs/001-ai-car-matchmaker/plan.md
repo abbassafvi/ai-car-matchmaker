@@ -86,10 +86,10 @@ mock listings
 
 | Principle | Gate | Status |
 |---|---|---|
-| I. Grounded Recommendations | UI values sourced only from tool-call records, never LLM-retyped | PASS — `render_a2ui.py` reads structured state/tool output directly; covered by `test_render_a2ui.py` |
+| I. Grounded Recommendations | UI values sourced only from tool-call records, never LLM-retyped | PARTIAL — the deterministic rendering layer exists (`render_a2ui.py`, covered by `test_render_a2ui.py`), but so far it renders only interview slots the *user* supplied. No listing price/spec has ever reached the UI, because no tool returns listing data yet. The principle's actual subject matter is unproven until T022/T026 (M3) |
 | II. Explicit Phase Gating | Transactional tools unavailable outside their phase | PASS (since M2.5) — `TOOLS_BY_PHASE` in `agent/state.py` is the single gate definition, and `agent/graph.py` builds one agent per phase from it; covered by `test_phase_gate.py` |
 | III. Mock-Only Transactions | No real payment path exists | PENDING — nothing to enforce yet; `confirm_mock_payment` lands in M4b |
-| IV. Untrusted Data Boundary | Listing/user text never treated as instructions | PARTIAL — delimiters and the "data, never instructions" rule are in every listing-facing prompt (`agent/prompts.py`), asserted by `test_phase_gate.py`. Behavioral proof against the seeded `ADV-*` probes is T029, in M3 |
+| IV. Untrusted Data Boundary | Listing/user text never treated as instructions | PARTIAL — the *rule* is in every listing-facing prompt (`agent/prompts.py`), asserted by `test_phase_gate.py`. But **nothing emits the `<untrusted_listing_data>` delimiters the rule refers to**: the only two occurrences in the repo are the prompt that describes them and the test that checks the prompt describes them. M3 must wrap listing text at the tool-output boundary, then T029 supplies the behavioral proof against the seeded `ADV-*` probes |
 | V. Full Observability | Every call/transition traced | PASS (since M2.5) — `setup_observability()` is called from the FastAPI lifespan before any agent is built; covered by `test_observability_wiring.py` + `test_otel_setup.py` |
 
 ### Correction (M2.5)
@@ -101,6 +101,25 @@ full live session emitted zero spans to a running Phoenix. Both are now
 genuinely wired and regression-tested. Recorded here rather than silently
 edited, because the failure mode worth remembering is that a Constitution
 Check table can pass review while describing code that does not exist.
+
+### Correction (M3 start)
+
+The same failure mode recurred twice more, found by the pre-M3 review:
+
+- **Row I read PASS.** It was PASS for a mechanism, not for the principle:
+  `render_a2ui.py` is genuinely deterministic, but every value it has ever
+  rendered came from the user's own interview answers. No listing price or
+  spec had ever passed through it, because no tool returned listing data.
+  Downgraded to PARTIAL until T022/T026.
+- **Row IV described delimiters that no code produces.**
+  `<untrusted_listing_data>` appears exactly twice in the repository: in the
+  prompt telling the model how to treat delimited content, and in the test
+  asserting that prompt says so. Nothing wraps anything. The rule was
+  self-referential.
+
+The lesson generalises: a gate row is only meaningful against the *subject
+matter* of its principle, and a test that asserts a prompt contains a rule
+proves the rule was written, not that it is enforced.
 
 Known deviation, accepted: `create_deep_agent` always installs
 `FilesystemMiddleware`, which binds nine built-in tools (`ls`, `read_file`,

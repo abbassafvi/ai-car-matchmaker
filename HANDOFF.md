@@ -89,8 +89,14 @@ M6   ⬜ Hardening, E2E tests, README finalization, deck, demo video
 ```
 
 **Test suite**: 53 total.
-- **47 pass with no external setup** — 39 `agent-backend` + 8 `mcp-services`
+- **50 pass with no external setup** — 42 `agent-backend` + 8 `mcp-services`
 - **All 53 pass** with a live LLM key *and* Phoenix running (verified 2026-08-08)
+- Exactly **3** tests are credential/Phoenix-gated (`grep -rn skipif tests/`):
+  `test_interview_agent`, `test_chat_endpoint`, `test_otel_setup`
+
+*(An earlier version of this file claimed 47 pass / 39 agent-backend / 6
+gated. All three numbers were wrong — corrected at M3 start by running the
+suite rather than trusting the doc.)*
 
 ⚠️ The credential gate checks key **presence** only. With a key set but out
 of quota, the live tests **fail** rather than skip. Check the provider
@@ -193,12 +199,29 @@ diffs before committing** (`git diff --cached | grep -E "^\+" | grep -E "<key pa
 
 ### ⚠️ LLM provider status (changed in M2.5 — read all of this)
 
-- **Current**: Google Gemini, `LLM_PROVIDER=google`, default model
-  `gemini-3.6-flash`, via the **native** `langchain-google-genai` client.
-- **Gemini free tier is ~20 requests/day/model.** Enough for a smoke test,
-  *not* for a demo, and not for M3's behavioral tests or the T046 eval run.
-  **A billed key is needed.** Each model has its own quota, so switching
-  `LLM_MODEL` buys headroom during development.
+- **Current (M3): Groq**, `LLM_PROVIDER=openai_compatible`,
+  `LLM_BASE_URL=https://api.groq.com/openai/v1`, `LLM_MODEL=openai/gpt-oss-120b`.
+  **Free tier ~1000 requests/day**, which is what makes M3's live behavioral
+  tests (T021/T029) and the T046 eval run affordable.
+- **Verified end-to-end at M3 start** through the real agent path
+  (`build_interview_agent` → `save_interview_state`), 2-turn tool-using
+  conversation, correct overwrite-not-append semantics. This is the **first**
+  time the `openai_compatible` path has worked — earlier versions of this file
+  correctly recorded it as unverified after NVIDIA NIM failed.
+- **⚠️ Groq rate-limits on TOKENS PER MINUTE**, not just requests
+  (`x-ratelimit-limit-tokens: 8000` for `gpt-oss-120b`), and the reservation
+  counts prompt + `max_tokens`. DeepAgents binds 10 tool schemas into every
+  request, so at `max_tokens=4096` one turn eats most of a minute's budget and
+  the next 429s into backoff. **Measured: 4096 → 39s/68s per turn; 1024 →
+  2.2s/1.7s.** Hence `DEFAULT_MAX_TOKENS_BY_PROVIDER` in `agent/llm.py`.
+  M3 makes this worse (listing text inflates prompts) — keep the model's
+  candidate slate short.
+- **Gemini is reserved for demo rehearsal / final verification.**
+  `LLM_PROVIDER=google`, default `gemini-3.6-flash`, native
+  `langchain-google-genai` client. **Free tier is ~20 requests/day/model** —
+  a smoke test, not a demo. Each model has its own quota, so switching
+  `LLM_MODEL` buys headroom. The key is preserved in a comment block in
+  `agent-backend/.env` for a one-line switch back.
 - **`gemini-2.5-*` is unusable** — rejected for newly-created keys with
   "no longer available to new users". Don't retry it.
 - **Do NOT switch Gemini to its OpenAI-compat endpoint.** Gemini 3.x are
@@ -276,7 +299,7 @@ means no LLM key; `tracing_enabled:false` means Phoenix registration failed.
 | `api/main.py` | FastAPI. `GET /health` (reports degraded), `WS /ws/{session_id}`. Owns SqliteSaver lifespan, registers observability, selects agent by phase, runs `agent.invoke` via `asyncio.to_thread`, normalizes content via **`message_text()`** |
 | `observability/otel_setup.py` | `setup_observability()` → `phoenix.otel.register(..., protocol="grpc", auto_instrument=True)` |
 | `.env` / `.env.example` | Secrets / committed template |
-| `tests/` | **10 modules**: `test_state`, `test_tools`, `test_graph_persistence`, `test_render_a2ui`, `test_chat_endpoint`, `test_chat_endpoint_error_handling`, `test_interview_agent`, `test_otel_setup`, **`test_phase_gate`**, **`test_observability_wiring`**, **`test_message_text`** |
+| `tests/` | **11 modules**: `test_state`, `test_tools`, `test_graph_persistence`, `test_render_a2ui`, `test_chat_endpoint`, `test_chat_endpoint_error_handling`, `test_interview_agent`, `test_otel_setup`, **`test_phase_gate`**, **`test_observability_wiring`**, **`test_message_text`** |
 
 ### mcp-services (Python)
 | File | Purpose |
@@ -319,8 +342,20 @@ Every one is verified, not assumed.
    `StateBackend` is a **virtual filesystem in graph state** — never touches
    the host — and has **no `execute` method**, so shell execution is inert.
    `test_phase_gate.py` pins the built-in set and asserts
-   `StateBackend.execute` stays absent. **Re-evaluate at M3**, when
-   untrusted listing text starts reaching the model.
+   `StateBackend.execute` stays absent. **Re-evaluated at M3** (below).
+4b. **The 9 built-ins cost ~2,726 prompt tokens in *every* request** —
+   roughly 4x our own system prompt (~362) plus `save_interview_state`
+   (~303) combined. Re-checked against `deepagents 0.7.5`: still not
+   removable. `create_deep_agent` does expose an undocumented-here
+   `permissions=[FilesystemPermission(...)]` parameter, but it is a
+   **runtime deny** (the tool returns permission-denied), so the schemas —
+   and their tokens — stay bound regardless. Dropping `create_deep_agent`
+   for langchain's plain `create_agent` would remove them, but hackathon
+   hard requirement #9 mandates the DeepAgents harness, so that trade is
+   not available. Consequence: this is a fixed ~2.7k/request tax that
+   interacts badly with Groq's 8k tokens/minute ceiling (§5).
+   **Still worth doing in M3**: pass deny-all `permissions` for the
+   Principle IV story even though it saves no tokens.
 5. **A DeepAgents agent's tools are fixed at construction.** That's why the
    phase gate is one agent *per phase* (`PhaseAgentRegistry`) rather than
    filtering at call time.
@@ -440,10 +475,14 @@ Principle IV. Options put to the user (they deferred answering):
 
 ### Layout note
 
-`mcp-apps-ui/` and `frontend/src/{chat,a2ui,mcp-app-host}/` don't exist yet;
-`mcp-services/{marketplace,booking,payment}/` exist but are empty (git doesn't
-track empty dirs). M2's frontend went into `frontend/src/App.tsx` directly.
-Create as needed — plan.md's tree is the intended target, not current reality.
+`mcp-apps-ui/{listing-detail,booking-form,checkout}`,
+`frontend/src/{chat,a2ui,mcp-app-host}` and
+`mcp-services/{marketplace,booking,payment}` **all exist on disk but are
+empty**, so git doesn't track them and a fresh clone won't have them —
+create as needed. (An earlier version of this file said `mcp-apps-ui/` and
+the `frontend/src` subfolders didn't exist; they do.) M2's frontend went
+into `frontend/src/App.tsx` directly. plan.md's tree is the intended
+target, not current reality.
 
 ---
 
@@ -458,8 +497,14 @@ Create as needed — plan.md's tree is the intended target, not current reality.
 - **`langchain-mcp-adapters` API unverified** — check at M3 start.
 - **`docker-compose.yml` has no `healthcheck:` blocks** — `depends_on` only
   waits for container start, not readiness. Harmless today; worth adding.
-- **Nothing consumes `Phase.RESEARCHING` yet** — the phase flips but no code
-  acts on it, so the interview agent keeps running. That's M3/T025's job.
+- **`Phase.RESEARCHING` is selected but powerless.** `api/main.py` *does*
+  switch agents on the persisted phase (`agents.for_phase(...)`), so the next
+  turn genuinely uses the RESEARCHING agent — an earlier version of this file
+  wrongly said the interview agent keeps running. The real problems are that
+  (a) that agent binds **zero** domain tools until `TOOL_REGISTRY` gains them,
+  and (b) nothing *triggers* research without another user message, which
+  contradicts spec.md US1 AS3 ("no further user prompt required to proceed").
+  Both are M3/T025's job.
 - **API keys were pasted into a chat transcript** (Gemini + an NVIDIA NIM key).
   Never committed. **Recommend rotating both after the hackathon.**
 

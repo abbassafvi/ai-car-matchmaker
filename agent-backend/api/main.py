@@ -1,8 +1,19 @@
 """WebSocket bridge between the frontend and the phase-gated agent.
 
-One long-lived SqliteSaver checkpointer backs all sessions -- opened once
-at startup via FastAPI's lifespan and closed at shutdown -- the same
-persistence layer already proven in tests/test_graph_persistence.py.
+One long-lived AsyncSqliteSaver checkpointer backs all sessions -- opened
+once at startup via FastAPI's lifespan and closed at shutdown -- against
+the same SQLite file and schema proven in tests/test_graph_persistence.py
+(which keeps using the sync SqliteSaver to test persistence in isolation).
+
+Why *Async*SqliteSaver, and why this whole module is async-all-the-way:
+M3's marketplace tools arrive via langchain-mcp-adapters, which produces
+`StructuredTool(coroutine=...)` with `func=None` -- i.e. async-only tools.
+Calling one synchronously raises "StructuredTool does not support sync
+invocation", and that holds inside an `asyncio.to_thread` worker too, so
+the previous `await asyncio.to_thread(agent.invoke, ...)` could not
+survive M3. Switching to `agent.ainvoke` in turn rules out the sync
+SqliteSaver, whose `aget_tuple`/`aput`/`alist` all raise
+NotImplementedError. Verified empirically before making this change.
 
 Message envelope (both directions):
   {"type": "chat", "content": "..."}                 -- chat text
@@ -11,7 +22,6 @@ Message envelope (both directions):
 """
 from __future__ import annotations
 
-import asyncio
 import logging
 import os
 from contextlib import asynccontextmanager
@@ -19,7 +29,7 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
-from langgraph.checkpoint.sqlite import SqliteSaver
+from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
 # Local/native dev convenience only -- in Docker, real env vars are passed
 # via compose, and this is a no-op if agent-backend/.env doesn't exist. Must
@@ -60,7 +70,7 @@ async def lifespan(app: FastAPI):
         log.warning("Tracing disabled -- could not register with Phoenix: %s", exc)
 
     Path(DB_PATH).parent.mkdir(parents=True, exist_ok=True)
-    with SqliteSaver.from_conn_string(DB_PATH) as checkpointer:
+    async with AsyncSqliteSaver.from_conn_string(DB_PATH) as checkpointer:
         # Boot even without credentials so a misconfigured deployment shows
         # a readable error in the UI and a degraded /health, rather than the
         # container dying at startup with a stack trace.
@@ -119,12 +129,17 @@ def message_text(message) -> str:
     return str(content)
 
 
-def _load_session(agents, config, session_id: str) -> dict:
-    """Current persisted SessionState for this thread, or a fresh one."""
+async def _load_session(agents, config, session_id: str) -> dict:
+    """Current persisted SessionState for this thread, or a fresh one.
+
+    `aget_state`, not `get_state`: AsyncSqliteSaver's sync methods refuse to
+    run on the same thread as their event loop, so the sync path would raise
+    here rather than silently working.
+    """
     if agents is None:
         return SessionState(session_id=session_id).model_dump(mode="json")
     agent = agents.for_phase(Phase.INTERVIEWING)
-    snapshot = agent.get_state(config)
+    snapshot = await agent.aget_state(config)
     return snapshot.values.get("session") or SessionState(session_id=session_id).model_dump(mode="json")
 
 
@@ -134,7 +149,7 @@ async def chat_ws(websocket: WebSocket, session_id: str):
     agents = websocket.app.state.agents
     config = {"configurable": {"thread_id": session_id}}
 
-    session = _load_session(agents, config, session_id)
+    session = await _load_session(agents, config, session_id)
 
     # Full component tree on every connect -- a freshly loaded frontend has
     # no prior tree to apply incremental updates to, whether this is a
@@ -161,13 +176,12 @@ async def chat_ws(websocket: WebSocket, session_id: str):
             agent = agents.for_phase(Phase(session["phase"]))
 
             try:
-                # agent.invoke is synchronous and spends most of its time in
-                # a network round trip. Running it inline would block the
-                # event loop for the whole call, serializing every other
-                # connected session behind it (spec.md US5 requires two
-                # sessions to be usable at once).
-                result = await asyncio.to_thread(
-                    agent.invoke,
+                # Native async, so the event loop stays free during the LLM
+                # round trip and concurrent sessions are not serialized
+                # behind each other (spec.md US5 AS2 requires two sessions
+                # usable at once -- the property T053 established with
+                # asyncio.to_thread, preserved here by different means).
+                result = await agent.ainvoke(
                     {"messages": [{"role": "user", "content": incoming["content"]}], "session": session},
                     config,
                 )

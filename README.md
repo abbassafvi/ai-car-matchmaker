@@ -12,8 +12,8 @@ Built for the Amulate Summer Hackathon 2026.
 
 M0 (scaffolding) + M1 (foundational) + M2 (conversational interview, User
 Story 1) + M2.5 (audit remediation) complete — **53 automated tests**, of
-which **47 run with no external setup at all** (39 `agent-backend` +
-8 `mcp-services`); the remaining 6 need a live LLM key and/or a running
+which **50 run with no external setup at all** (42 `agent-backend` +
+8 `mcp-services`); the remaining 3 need a live LLM key and/or a running
 Phoenix and auto-skip without them. Plus live end-to-end verification
 against a real Docker Compose build. See
 [`specs/001-ai-car-matchmaker/`](specs/001-ai-car-matchmaker/) for the full
@@ -47,8 +47,14 @@ Without a key the stack still comes up — `/health` reports
 the backend dying at startup.
 
 > **Quota note**: Gemini's free tier allows roughly **20 requests per day
-> per model**. That covers a smoke test, not a live demo. Use a billed key
-> for anything real, or switch `LLM_MODEL` to spread load.
+> per model** — a smoke test, not a live demo. Groq's free tier allows
+> ~1000/day and works end-to-end with tool calling, so it is the default
+> for development; see `.env.example` for both configurations.
+>
+> If you point `LLM_PROVIDER=openai_compatible` at Groq, leave
+> `LLM_MAX_TOKENS` alone unless you re-measure: Groq rate-limits on *tokens
+> per minute*, and raising the output cap pushes agent turns from ~2s into
+> 40–70s of retry backoff.
 
 | Service | URL |
 |---|---|
@@ -87,7 +93,7 @@ failure, but check the provider account before assuming a code bug.
 ## Tech stack
 
 - **Agent harness**: [LangChain DeepAgents](https://docs.langchain.com/labs/deep-agents/overview) (LangGraph)
-- **LLM provider**: [Google Gemini](https://ai.google.dev/) via the native `langchain-google-genai` client (default `gemini-3.6-flash`). `LLM_PROVIDER=openai_compatible` swaps to any OpenAI-compatible API (OpenRouter, NVIDIA NIM) — provider and model are config, not code
+- **LLM provider**: config, not code. `LLM_PROVIDER=google` uses [Google Gemini](https://ai.google.dev/) via the native `langchain-google-genai` client (default `gemini-3.6-flash`); `LLM_PROVIDER=openai_compatible` uses any OpenAI-compatible API. Development runs on [Groq](https://groq.com/) (`openai/gpt-oss-120b`) because its free tier allows ~1000 requests/day against Gemini's ~20, keeping the scarce Gemini quota for demo rehearsal
 - **Tool protocol**: [MCP](https://modelcontextprotocol.io/) (Python SDK, Streamable HTTP) — M3+
 - **In-chat transactional UI**: [MCP Apps](https://apps.extensions.modelcontextprotocol.io/) — booking form + mock checkout (sandboxed iframes) — M4
 - **Generative UI**: [A2UI](https://a2ui.org/) v0.9 protocol via the real [`@a2ui/react`](https://www.npmjs.com/package/@a2ui/react) renderer — car catalogue + live agent progress/reasoning

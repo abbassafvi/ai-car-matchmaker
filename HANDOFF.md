@@ -5,10 +5,10 @@ continue this project with zero re-discovery and without repeating mistakes
 already made and fixed. Read this file first, then the files listed in
 [§13 Required reading](#13-required-reading).
 
-**Last updated**: 2026-08-08, after the **Phase C pre-flight audit** (the
-fourth). M3 is *in progress* — Phases A and B are done, C–F are not.
+**Last updated**: 2026-08-08, after **M3 Phase C** (T024 + T025) shipped.
+M3 is *in progress* — Phases A, B and C are done, D–F are not.
 
-> **Treat every claim in this file as a claim, not as truth.** Three separate
+> **Treat every claim in this file as a claim, not as truth.** Four separate
 > audits have now found docs asserting behaviour the code did not have. The
 > numbers below were measured on 2026-08-08, not copied forward. See §3.
 
@@ -30,11 +30,11 @@ and a *mocked* checkout **without leaving the chat**.
 
 | # | Requirement | Status |
 |---|---|---|
-| 1 | Multistep agent: interview → research → ranked+explained recommendations | 🟡 interview done; marketplace tools done; ranking + surfacing = M3 Phase C/D |
+| 1 | Multistep agent: interview → research → ranked+explained recommendations | 🟡 interview → auto-research → deterministic ranking + explanations all working end to end (verified live). Remaining: surfacing them via **A2UI** rather than chat prose = M3 Phase D |
 | 2 | Interview captures: use case, car type/category, budget, buy-vs-rent, target date | ✅ |
 | 3 | **Form-filling MUST be an MCP App** rendered inside the chat | ⬜ M4a |
 | 4 | **Mock payment/checkout MUST be an MCP App** rendered inside the chat | ⬜ M4b |
-| 5 | Car catalogue + live agent progress (interview state, search status, **reasoning steps**) MUST render via **A2UI** — explicitly *"not static HTML"* | 🟡 progress surface live; catalogue + reasoning = M3 Phase D |
+| 5 | Car catalogue + live agent progress (interview state, search status, **reasoning steps**) MUST render via **A2UI** — explicitly *"not static HTML"* | 🟡 interview-progress surface live in A2UI. Reasoning steps are **generated** and streamed but currently ride a placeholder `{"type":"progress"}` message — converting them plus the catalogue to A2UI is M3 Phase D (T026). **This row is not satisfiable without Phase D.** |
 | 6 | No real payments, no BMW Group APIs — checkout fully mocked | ✅ by construction |
 | 7 | Mock marketplace: **≥100 listings, ≥10 categories, ≥10 brands per category** | ✅ 203 / 10 / 20 |
 | 8 | Maintain state across interview/research/recommendation (multistep memory) | ✅ checkpointer proven across restart + session isolation + live WS reconnect |
@@ -87,7 +87,7 @@ M2.5 ✅ Audit remediation — see §3
 M3   🟡 IN PROGRESS — Research & Ranked Recommendations (User Story 2)
        ✅ Phase A  async agent path (blocking prerequisite, see §3)
        ✅ Phase B  T020 + T023 marketplace MCP server
-       ⬜ Phase C  T024 + T025 adapter wiring, ranking, research auto-kickoff
+       ✅ Phase C  T024 + T025 adapter wiring, ranking, research auto-kickoff
        ⬜ Phase D  T026 + T022 A2UI catalogue + reasoning surfaces
        ⬜ Phase E  T028 frontend rendering + listing selection
        ⬜ Phase F  T021 + T029 live behavioural tests
@@ -99,15 +99,15 @@ M5   ⬜ Evals (observability itself is wired, M2.5/T051)
 M6   ⬜ Hardening, E2E tests, README finalization, deck, demo video
 ```
 
-**Test suite: 80 total** (measured 2026-08-08, not copied forward).
+**Test suite: 117 total** (measured 2026-08-08 after Phase C, not copied forward).
 
 | Suite | Tests | Gated | Files |
 |---|---|---|---|
 | `mcp-services` | **35** | 0 | `test_generate_listings` (8), `test_marketplace` (18), `test_marketplace_server` (9) |
-| `agent-backend` | **45** | 3 | 11 modules, see §7 |
+| `agent-backend` | **82** | 3 | 14 modules, see §7 |
 
-- **77 pass with no external setup** (35 + 42)
-- **All 80 pass** with a live LLM key *and* Phoenix running — verified 2026-08-08
+- **114 pass with no external setup** (35 + 79)
+- **All 117 pass** with a live LLM key *and* Phoenix running — verified 2026-08-08
 - Exactly **3** gated tests (`grep -rn skipif */tests/`): `test_interview_agent`
   and `test_chat_endpoint` (need `LLM_API_KEY`), `test_otel_setup` (needs Phoenix)
 
@@ -117,6 +117,8 @@ account before assuming a code bug.
 
 **Git log** (main, clean, synced with origin):
 ```
+e31fbdc  M3 Phase C (T024, T025): MCP wiring, code-driven search, ranking
+8e44793  M3 Phase C pre-flight audit: fix test collection, correct stale docs
 2fa9fcf  docs: bring HANDOFF/README/plan/tasks up to M3 Phase B state
 c6915fd  M3 Phase B (T020, T023): marketplace MCP server over Streamable HTTP
 dea1576  M3 Phase A: async agent path, provider-aware token caps, doc corrections
@@ -322,7 +324,7 @@ docker compose up --build
 # Tests (run the FULL suite together, never file-by-file — see §8.31)
 source .venv/bin/activate
 (cd mcp-services  && python -m pytest tests/ -q)   # 35 pass, no setup needed
-(cd agent-backend && python -m pytest tests/ -q)   # 42 pass, 3 skip
+(cd agent-backend && python -m pytest tests/ -q)   # 79 pass, 3 skip
 # Bare `pytest tests/` also works now. It did NOT before the Phase C
 # audit -- both suites died at collection, and only `python -m pytest`
 # worked, because it puts the cwd on sys.path. Fixed with a conftest.py
@@ -331,7 +333,7 @@ source .venv/bin/activate
 # With live LLM (see §5) and Phoenix:
 docker compose up -d phoenix
 set -a && . agent-backend/.env && set +a
-(cd agent-backend && python -m pytest tests/ -q)   # 45 pass, 0 skip
+(cd agent-backend && python -m pytest tests/ -q)   # 82 pass, 0 skip
 
 # Regenerate mock dataset (deterministic — byte-identical each run;
 # a test asserts the committed file equals generate())
@@ -344,8 +346,13 @@ python mcp-services/data/generate_listings.py
 **Always `docker compose down` when finished** — don't leave containers running.
 
 **Health endpoints tell you the config state**:
-- `agent-backend`: `{"status":"ok","llm_configured":true,"tracing_enabled":true}`
-  — `degraded` means no LLM key; `tracing_enabled:false` means Phoenix failed.
+- `agent-backend`: `{"status":"ok","llm_configured":true,"tracing_enabled":true,
+  "mcp_connected":true,"marketplace_tools":["get_listing_details","search_listings"]}`
+  — since M3 Phase C `degraded` means **either** no LLM key **or** an
+  unreachable marketplace; check `llm_configured` / `mcp_connected` to tell
+  which. `tracing_enabled:false` means Phoenix failed. Note `mcp_connected`
+  is not self-healing: discovery runs once at startup and agents cache their
+  tools, so mcp-services coming back needs a backend restart.
 - `mcp-services`: `{"status":"ok","servers":["marketplace"],"listings":203}`
 
 ---
@@ -367,12 +374,15 @@ python mcp-services/data/generate_listings.py
 | `agent/graph.py` | (a) M1's minimal `build_graph()`/`compiled_graph()` persistence scaffold — **keep as-is**. (b) `TOOL_REGISTRY` (name→tool), `tools_for_phase()`, `build_agent_for_phase()`, **`PhaseAgentRegistry`**, `CarMatchmakerState(DeepAgentState)` carrying `session: dict`. **Phase C registers the MCP tools here** |
 | `agent/tools.py` | `save_interview_state` — a `@tool` returning a LangGraph `Command` |
 | `agent/prompts.py` | `PHASE_SYSTEM_PROMPTS` (a missing entry fails at startup). Listing-facing phases embed `UNTRUSTED_DATA_RULE` |
+| `agent/mcp_client.py` | **T024**: `discover_marketplace_tools()` — fail-soft MCP discovery, returns `[]` rather than raising. Never touches `TOOL_REGISTRY` |
+| `agent/ranking.py` | **T025**: deterministic `rank()` over tool-artifact records. Min-max normalised *within the slate*; `reasoning` is a template filled from record fields, never the `description` |
+| `agent/research.py` | **T025**: `run_research()` — code-driven first search from persisted interview state, AS2 relaxation ladder, `narration_brief()` for the model |
 | `agent/llm.py` | `build_model()` selects by `LLM_PROVIDER`. **`DEFAULT_MAX_TOKENS_BY_PROVIDER`** (google 4096 / openai_compatible 1024) + `LLM_MAX_TOKENS` override |
 | `agent/render_a2ui.py` | `build_interview_surface_init()`/`_update()`, `_display()`. **A2UI v0.9**. **Phase D adds catalogue + reasoning surfaces here** |
 | `api/main.py` | FastAPI. `GET /health`, `WS /ws/{session_id}`. **AsyncSqliteSaver lifespan, `agent.ainvoke`, `aget_state`**, `message_text()` |
 | `observability/otel_setup.py` | `setup_observability()` → `phoenix.otel.register(..., protocol="grpc", auto_instrument=True)` |
 | `conftest.py` | Puts the service root on `sys.path` so the suite collects under a bare `pytest`, not only `python -m pytest`. Added by the Phase C audit — see §3 |
-| `tests/` | **11 modules, 45 tests**: `test_state`(6), `test_tools`(5), `test_graph_persistence`(2), `test_render_a2ui`(8), `test_chat_endpoint`(3), `test_chat_endpoint_error_handling`(1), `test_interview_agent`(1), `test_otel_setup`(1), `test_phase_gate`(10), `test_observability_wiring`(2), `test_message_text`(6) |
+| `tests/` | **14 modules, 82 tests** (+`test_ranking` 12, `test_research` 17, `test_mcp_wiring` 8)<br>previously **11 modules, 45 tests**: `test_state`(6), `test_tools`(5), `test_graph_persistence`(2), `test_render_a2ui`(8), `test_chat_endpoint`(3), `test_chat_endpoint_error_handling`(1), `test_interview_agent`(1), `test_otel_setup`(1), `test_phase_gate`(10), `test_observability_wiring`(2), `test_message_text`(6) |
 
 ### mcp-services (Python) — **rewritten in M3 Phase B**
 | File | Purpose |
@@ -539,9 +549,14 @@ Full text in `.specify/memory/constitution.md`.
 
 1. **Grounded Recommendations (NON-NEGOTIABLE)** — every price/spec/availability
    shown must be traceable verbatim to a tool-call result.
-   *Status: **PARTIAL**. The mechanism exists; no listing value has reached the
-   UI yet. T022/T026 (Phase D) is where this becomes real. The channel is
-   `ToolMessage.artifact["structured_content"]` (finding 5).*
+   *Status: **PARTIAL**, materially advanced in Phase C. Listing values now
+   reach the user and are grounded end to end: the query is built from
+   persisted state (not the model), ranking is deterministic Python over
+   `ToolMessage.artifact["structured_content"]` (finding 5), and verbatim
+   records persist in `SessionState.candidate_listings`. Verified live —
+   4 records byte-identical to `listings.json`, 11/11 numbers in the model's
+   narration traceable. Still PARTIAL because the principle names the **UI**,
+   and the A2UI catalogue is T026/T022 (Phase D).*
 2. **Explicit Phase Gating** — a *code-enforced* state machine. `TOOLS_BY_PHASE`
    is the single gate definition; `PhaseAgentRegistry` builds one agent per
    phase from it. *Genuinely enforced since M2.5.*
@@ -558,9 +573,39 @@ Full text in `.specify/memory/constitution.md`.
 
 ---
 
-## 10. NEXT UP: M3 Phase C — start here
+## 10. NEXT UP: M3 Phase D — start here
 
-### Immediate next task: T024 + T025
+> **Phase C (T024 + T025) is DONE and pushed.** What landed, and the
+> decisions taken, are recorded in tasks.md under T024/T025. Summary:
+>
+> - `agent/mcp_client.py` — fail-soft discovery in the FastAPI lifespan.
+> - `agent/ranking.py` — deterministic ranker over the tool artifact.
+>   Scores are min-max normalised *within the slate*.
+> - `agent/research.py` — **code-driven first search** (the user's
+>   decision): the query is built from persisted interview state and the
+>   tool is called directly, so no constraint or price round-trips through
+>   the model. The model narrates afterwards and keeps its bound tools for
+>   follow-ups. Includes the AS2 relaxation ladder
+>   (availability → budget +20% → category), which skips no-op steps.
+> - `SessionState.record_research()` — the code-enforced
+>   RESEARCHING → RESULTS_READY transition. Advances on zero results,
+>   **not** on an error (so a transient outage retries).
+> - `candidate_listings` is now `list[dict]` of verbatim tool records.
+> - `/health` reports `mcp_connected` + `marketplace_tools`, and `status`
+>   degrades on either a missing key *or* an unreachable marketplace.
+> - **Tests: 117** (82 agent-backend + 35 mcp-services), 114 with no setup.
+>
+> ⚠️ **Two things Phase D must inherit:**
+> 1. `api/main.py` sends `{"type": "progress", "steps": [...]}` as a
+>    placeholder. Requirement #5 and FR-005 say reasoning steps must be
+>    **A2UI** — T026 replaces it. The multi-send path is already
+>    restructured, so this is a substitution, not a rewrite.
+> 2. A grounding check that examines nothing passes. Phase C's first
+>    narration check missed every price because `gpt-oss-120b` writes
+>    "$17 391" with a thin space — **T022 must assert its own
+>    non-vacuity.** See tasks.md T025.
+
+### Previous task (done): T024 + T025
 
 **T024 — wire `langchain-mcp-adapters` into agent-backend.**
 The API is **already verified** (§8.1–8.7) — do not re-research it.
@@ -675,11 +720,18 @@ since an injection result is only evidence for the model it ran on.
 - **DeepAgents' ~2.7k token/request tax** (§8.12) — unavoidable given req #9.
 - **`frontend/src/{chat,a2ui,mcp-app-host}/` are empty** — M2 put everything in
   `App.tsx`. Split when M4's host adds real complexity.
-- **`agent-backend/requirements.txt` still lists the MCP deps as a comment** —
-  T024 must promote them to real entries (**both** of them; the comment
-  previously named only the adapter and omitted the `mcp>=1.24,<2` pin).
-- **`select_listing` is a phase-gate entry with no implementation and, until
-  now, no owning task** — assigned to T028(b). M4a depends on it.
+- ✅ *(resolved in Phase C)* `agent-backend/requirements.txt` now carries both
+  `langchain-mcp-adapters` and `mcp>=1.24,<2` as real entries.
+- **`select_listing` is a phase-gate entry with no implementation** —
+  assigned to T028(b). **M4a depends on it**: Principle II's own example is
+  `open_booking_form` gated on a listing being selected.
+- 🔴 **The demo's headline path still opens on a constraint relaxation.**
+  §3b fixed the *price* floor so US2 AS1 matches 4 SUVs, but every real
+  session also applies `target_date`, and **0** of those 4 are available
+  before 2026-09-01 (they land 09-18 → 12-19; only 47/203 listings are
+  available before September). Behaviour is correct and was verified live,
+  but a judge's first impression is an apology. Options in tasks.md T021 —
+  the cheapest is to demo with a later target date.
 - 🔴 **Rotate all three API keys** (Gemini, Groq, NVIDIA NIM) after the demo —
   all have been pasted into chat transcripts. None was ever committed.
 

@@ -18,7 +18,15 @@ NotImplementedError. Verified empirically before making this change.
 Message envelope (both directions):
   {"type": "chat", "content": "..."}                 -- chat text
   {"type": "a2ui", "messages": [...]}                 -- A2UI protocol messages (agent -> client only)
+  {"type": "progress", "steps": [...]}                -- research reasoning steps (agent -> client only)
   {"type": "error", "message": "..."}                 -- graceful failure (agent -> client only)
+
+`progress` is a Phase C placeholder with a deliberate shelf life: hackathon
+requirement #5 and FR-005 say reasoning steps must render via A2UI, so T026
+(Phase D) replaces it with real A2UI surface messages. It exists now because
+the send path had to be restructured for multi-send turns anyway (one
+inbound message can now produce an interview update, a research trace and a
+narration), and doing that once is cheaper than doing it twice.
 """
 from __future__ import annotations
 
@@ -39,7 +47,9 @@ load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 
 from agent.graph import PhaseAgentRegistry  # noqa: E402
 from agent.llm import is_configured  # noqa: E402
+from agent.mcp_client import discover_marketplace_tools  # noqa: E402
 from agent.render_a2ui import build_interview_surface_init, build_interview_surface_update  # noqa: E402
+from agent.research import SEARCH_TOOL, narration_brief, run_research  # noqa: E402
 from agent.state import InterviewState, Phase, SessionState  # noqa: E402
 from observability.otel_setup import setup_observability  # noqa: E402
 
@@ -69,13 +79,20 @@ async def lifespan(app: FastAPI):
     except Exception as exc:  # pragma: no cover - depends on Phoenix availability
         log.warning("Tracing disabled -- could not register with Phoenix: %s", exc)
 
+    # T024: discover the marketplace tools once, here, because DeepAgents
+    # fixes an agent's tool set at construction -- the registry below cannot
+    # acquire them later. Fail-soft like tracing: an unreachable mcp-services
+    # degrades research rather than taking the backend down.
+    marketplace_tools = await discover_marketplace_tools()
+    app.state.marketplace_tools = marketplace_tools
+
     Path(DB_PATH).parent.mkdir(parents=True, exist_ok=True)
     async with AsyncSqliteSaver.from_conn_string(DB_PATH) as checkpointer:
         # Boot even without credentials so a misconfigured deployment shows
         # a readable error in the UI and a degraded /health, rather than the
         # container dying at startup with a stack trace.
         if is_configured():
-            app.state.agents = PhaseAgentRegistry(checkpointer)
+            app.state.agents = PhaseAgentRegistry(checkpointer, extra_tools=marketplace_tools)
         else:
             app.state.agents = None
             log.warning("LLM_API_KEY not set -- starting in degraded mode, chat will not work.")
@@ -88,15 +105,26 @@ app = FastAPI(lifespan=lifespan)
 
 @app.get("/health")
 async def health():
-    """Reports degraded (not failed) without an LLM key, so the container
-    stays up and the cause is visible.
+    """Reports degraded (not failed) on a missing LLM key or an unreachable
+    marketplace, so the container stays up and the cause is visible.
+
+    `mcp_connected` is reported for the same reason `tracing_enabled` is:
+    without it, a failed tool discovery presents to a user as "the agent
+    just never searches", which is indistinguishable from a logic bug. Note
+    that tool discovery happens once at startup and the per-phase agents
+    cache their tools, so a false here is not self-healing -- mcp-services
+    coming back up needs a backend restart to take effect.
     """
     configured = app.state.agents is not None
+    tools = getattr(app.state, "marketplace_tools", []) or []
+    mcp_connected = any(tool.name == SEARCH_TOOL for tool in tools)
     return {
-        "status": "ok" if configured else "degraded",
+        "status": "ok" if (configured and mcp_connected) else "degraded",
         "service": "agent-backend",
         "llm_configured": configured,
         "tracing_enabled": getattr(app.state, "tracing_enabled", False),
+        "mcp_connected": mcp_connected,
+        "marketplace_tools": sorted(tool.name for tool in tools),
     }
 
 
@@ -127,6 +155,56 @@ def message_text(message) -> str:
                 parts.append(block.get("text", ""))
         return "".join(parts)
     return str(content)
+
+
+async def _run_research_turn(websocket: WebSocket, agents, session: dict, config) -> dict:
+    """T025: research runs in the same turn the interview completes.
+
+    spec.md US1 AS3 requires the INTERVIEWING -> RESEARCHING transition to
+    proceed "with no further user prompt required". Previously the phase
+    flipped mid-turn but nothing ran until the user happened to send another
+    message, so the agent looked like it had simply stopped.
+
+    The search itself is code-driven (agent/research.py explains why): the
+    constraints go from persisted state straight into the tool call, so no
+    price or filter has to survive a round trip through the model's memory.
+    The model is invoked afterwards, to narrate a slate it can read.
+    """
+    outcome = await run_research(session["interview"], agents.extra_tools)
+
+    # Phase D (T026) replaces this with an A2UI reasoning-steps surface.
+    await websocket.send_json({"type": "progress", "steps": outcome.steps})
+
+    if outcome.error:
+        # A failed pass leaves the phase at RESEARCHING deliberately, so the
+        # next message retries -- this is the recoverable case (mcp-services
+        # restarting, a transient network fault) and silently advancing past
+        # it would strand the session with an empty catalogue forever.
+        log.warning("Research did not complete for session %s: %s",
+                    session["session_id"], outcome.error)
+    else:
+        # A completed pass advances even when it found nothing: research
+        # genuinely ran, and staying in RESEARCHING would re-run the same
+        # fruitless search on every subsequent message. The user can adjust
+        # constraints from RESULTS_READY, where the search tools are still
+        # bound by the gate.
+        state = SessionState.model_validate(session)
+        state.record_research(outcome.listings, outcome.recommendations)
+        session = state.model_dump(mode="json")
+
+    narrator = agents.for_phase(Phase(session["phase"]))
+    result = await narrator.ainvoke(
+        {"messages": [{"role": "user", "content": narration_brief(outcome)}],
+         "session": session},
+        config,
+    )
+    session = result["session"]
+
+    await websocket.send_json({
+        "type": "chat", "role": "assistant",
+        "content": message_text(result["messages"][-1]),
+    })
+    return session
 
 
 async def _load_session(agents, config, session_id: str) -> dict:
@@ -209,5 +287,20 @@ async def chat_ws(websocket: WebSocket, session_id: str):
                 "type": "a2ui",
                 "messages": [build_interview_surface_update(InterviewState(**session["interview"]))],
             })
+
+            # One inbound message can now produce several outbound ones: the
+            # interview reply above, then a research trace and a narration.
+            if Phase(session["phase"]) == Phase.RESEARCHING:
+                try:
+                    session = await _run_research_turn(websocket, agents, session, config)
+                except Exception:
+                    # Same contract as the interview turn: a failure explains
+                    # itself and leaves the session usable. `session` keeps
+                    # its pre-research value, so the next message retries.
+                    log.exception("Research turn failed for session %s", session_id)
+                    await websocket.send_json({
+                        "type": "error",
+                        "message": "I couldn't finish researching listings. Please try again.",
+                    })
     except WebSocketDisconnect:
         pass

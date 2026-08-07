@@ -373,7 +373,41 @@ decision for the user** and should be settled before Phase C starts.
       explain). Ceilings, seed, counts and the 3 `ADV-*` probes unchanged;
       AS1 now matches 4 listings.
 - [ ] T021 [P] [US2] Integration test: zero-match query triggers constraint
-      relaxation messaging, not fabricated results — `agent-backend/tests/test_research.py`
+      relaxation messaging, not fabricated results — `agent-backend/tests/test_research.py`.
+      The deterministic half is **already covered** by the ladder tests in
+      `tests/test_research.py` (relaxation order, no-op steps skipped,
+      exhaustion reports nothing rather than inventing). What T021 still
+      owes is the live-gated half: a real model, given a zero-result
+      outcome, states which constraint it relaxed.
+
+      🔴 **Dataset finding from Phase C's live run — the §3b fix is
+      incomplete, and this affects the demo.** §3b lowered category price
+      floors so spec.md US2 AS1 (SUV / $25,000 / buy) stopped matching zero
+      listings, and it does now match 4. But AS1 as written specifies no
+      target date, while `target_date` is one of the five **mandatory**
+      interview slots (FR-002) — so every real session applies an
+      availability filter that AS1 never mentions. Measured against the
+      committed dataset:
+
+      | Query | Matches |
+      |---|---|
+      | SUV, ≤$25,000, buy-or-both | 4 |
+      | …**and** available by 2026-09-01 | **0** |
+
+      The four qualifying SUVs become available 2026-09-18, 11-10, 11-28 and
+      12-19; the dataset spans 2026-08-01 → 12-28, and only 47/203 listings
+      are available before September. So the headline demo still opens on
+      the relaxation path — the exact outcome §3b set out to prevent, just
+      via availability instead of price. **Behaviour is correct** (verified
+      live: the agent relaxed availability, said so, and never fabricated),
+      but the first thing a judge sees is an apology. Three options, none
+      taken yet because this is the user's call:
+      (a) skew availability earlier for the budget tier in
+      `generate_listings.py` — same shape of fix as §3b, one constant table
+      plus a regenerate;
+      (b) leave the data and pick a demo target date of ~2027-01-01, which
+      makes the happy path happy and costs nothing;
+      (c) leave it and demo the relaxation deliberately as the AS2 story.
 - [ ] T022 [P] [US2] Snapshot test: A2UI catalogue JSON values equal source
       tool-call record values exactly (Principle I / SC-002).
       **Also assert `<untrusted_listing_data>` appears in no rendered
@@ -407,7 +441,18 @@ decision for the user** and should be settled before Phase C starts.
       serialises into the model's context — the agent side never gets a
       chance to wrap it later. Confirmed live that the `ADV-0001` payload
       arrives *inside* the delimiters.
-- [ ] T024 [US2] `agent-backend`: `langchain-mcp-adapters` wiring.
+- [x] T024 [US2] `agent-backend`: `langchain-mcp-adapters` wiring.
+      **DONE (Phase C).** `agent/mcp_client.py` discovers the tools once in
+      the FastAPI lifespan; `PhaseAgentRegistry(checkpointer, extra_tools=)`
+      injects them via `graph.resolve_registry()`, which returns a new dict
+      and never mutates the module-level `TOOL_REGISTRY` — so
+      `test_phase_gate.py` keeps meaning the same thing under pytest and
+      under the app. `/health` now reports `mcp_connected` and
+      `marketplace_tools`, and `status` degrades when either the LLM key or
+      the marketplace is missing (it previously tracked the key only).
+      Covered by `tests/test_mcp_wiring.py` (8 tests), including that
+      injection **cannot widen the gate** — a discovered tool the gate never
+      named stays unbound in every phase.
       **API verification is DONE** (see HANDOFF §8.1–8.7) — the NEEDS
       VERIFICATION flag is cleared; don't re-research it. Shape:
       `MultiServerMCPClient({"marketplace": {"transport": "streamable_http",
@@ -442,7 +487,7 @@ decision for the user** and should be settled before Phase C starts.
       Phase B server: an unknown listing id comes back as a `ToolMessage`
       with `status="error"` and the message in `.content`, *not* as an
       exception. `try/except` around `ainvoke` will never see it.
-- [ ] T025 [US2] `agent-backend/agent/graph.py`: RESEARCHING phase behaviour
+- [x] T025 [US2] `agent-backend/agent/graph.py`: RESEARCHING phase behaviour
       (search → rank → reasoning), RESULTS_READY transition. Two decisions
       already taken: **(a) ranking is deterministic Python, not the LLM** —
       `RankedRecommendation` is built from the tool artifact's structured
@@ -507,6 +552,51 @@ decision for the user** and should be settled before Phase C starts.
       Restructure the send path here in Phase C — T026's reasoning-steps
       surface has to stream from inside that loop, and retrofitting it in
       Phase D means rewriting this code twice.
+
+      **DONE (Phase C) — how each was resolved:**
+      (i) **Code-driven first search**, per the user's decision.
+      `agent/research.py` builds the query from `session["interview"]` and
+      calls the tool directly; the model is invoked afterwards only to
+      narrate a slate it can read. Principle I holds by construction on the
+      headline path — no constraint or price makes a round trip through the
+      model's memory. The model keeps its bound tools for follow-ups.
+      (ii) `SessionState.record_research()` is the code-enforced
+      RESEARCHING → RESULTS_READY transition, sitting next to
+      `save_interview_slots`'s so every phase transition in the system is in
+      one module. It advances even on zero results (research genuinely ran;
+      staying would re-run the same fruitless search on every message) but
+      **not** on an error, so a transient mcp-services outage retries.
+      (iii) `candidate_listings` is now `list[dict]` holding the verbatim
+      tool records rather than ids — `candidate_ids()` derives the id list.
+      The ranking is persisted, not recomputed per turn.
+      (iv) `api/main.py`'s `_run_research_turn` restructures the send path
+      for multi-send turns; a `{"type": "progress"}` message carries the
+      reasoning steps until T026 replaces it with A2UI.
+      Ranking lives in `agent/ranking.py`, min-max normalised *within the
+      returned slate* so a score means "best of what actually matched"
+      rather than resting on invented absolute thresholds. Covered by
+      `tests/test_ranking.py` (12) and `tests/test_research.py` (17), all
+      deterministic — no key needed, so CI covers US2's whole core logic.
+
+      **Live verification** (real backend, real MCP server, real Groq, real
+      WebSocket): one message completing the interview auto-kicked off
+      research with no second prompt, 4 reasoning steps streamed, the phase
+      advanced to RESULTS_READY, and all four persisted records were
+      byte-identical to `listings.json` on price/year/mileage/category.
+      Every number the model wrote in its narration (11 of them) traced to
+      the slate; no fabricated listing id.
+
+      ⚠️ **A verification bug worth recording — it is the §3 pattern in a
+      test rather than in a doc.** The first grounding check searched for
+      `\$\s?([0-9][0-9,]{2,})`, but `gpt-oss-120b` writes prices as
+      "$17 391" with a thin space, so the pattern matched **nothing** and
+      the check passed having examined zero numbers. It only surfaced
+      because the evidence line printed `dollar figures: []`. The check now
+      normalises digit separators first and **asserts it is non-vacuous**
+      before trusting its own verdict. T022 must do the same — a
+      snapshot test that silently matches nothing is worse than no test.
+
+      ⚠️ **Dataset finding for T021/the demo — see the note under T021.**
 - [ ] T026 [US2] `agent-backend/agent/render_a2ui.py`: reasoning-steps
       surface (distinct from catalogue) + catalogue surface, both fed from
       structured tool output only

@@ -95,7 +95,25 @@ class SessionState(BaseModel):
     session_id: str
     phase: Phase = Phase.INTERVIEWING
     interview: InterviewState = Field(default_factory=InterviewState)
-    candidate_listings: list[str] = Field(default_factory=list)
+
+    # Verbatim listing records as they came out of the search tool's
+    # artifact -- NOT ids, and not anything re-derived. This is the
+    # persisted form of the Principle I grounding channel: what T026 renders
+    # and what T022 snapshots against must both read from here, so that a
+    # value on screen is traceable to a specific tool-call result even after
+    # a reconnect or a backend restart.
+    #
+    # Records rather than ids because re-fetching on every reconnect would
+    # make the catalogue depend on the marketplace still being reachable and
+    # still returning the same rows, which is exactly the coupling the
+    # grounding rule exists to avoid. `candidate_ids()` derives the id list
+    # spec.md's entity description talks about.
+    candidate_listings: list[dict] = Field(default_factory=list)
+
+    # Deterministically derived from candidate_listings (agent/ranking.py),
+    # never authored by the model -- spec.md's RankedRecommendation entity
+    # says so explicitly. Persisted rather than recomputed per turn so a
+    # resumed session shows the same ranking it showed before.
     recommendations: list[RankedRecommendation] = Field(default_factory=list)
     selected_listing_id: Optional[str] = None
     booking: Optional[Booking] = None
@@ -111,6 +129,28 @@ class SessionState(BaseModel):
         self.interview = InterviewState(**current)
         if self.interview.is_complete() and self.phase == Phase.INTERVIEWING:
             self.phase = Phase.RESEARCHING
+        return self
+
+    def candidate_ids(self) -> list[str]:
+        """Ids of the current candidate slate, in rank order."""
+        return [listing["id"] for listing in self.candidate_listings]
+
+    def record_research(
+        self,
+        listings: list[dict],
+        recommendations: list["RankedRecommendation"],
+    ) -> "SessionState":
+        """Store a completed research pass and advance the phase.
+
+        The RESEARCHING -> RESULTS_READY transition lives here, next to
+        `save_interview_slots`'s INTERVIEWING -> RESEARCHING, so that every
+        phase transition in the system is a code path in this module rather
+        than something a model decides it has finished (Principle II).
+        """
+        self.candidate_listings = listings
+        self.recommendations = recommendations
+        if self.phase == Phase.RESEARCHING:
+            self.phase = Phase.RESULTS_READY
         return self
 
     def available_tools(self) -> list[str]:

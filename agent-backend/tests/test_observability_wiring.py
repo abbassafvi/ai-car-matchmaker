@@ -48,9 +48,16 @@ def test_unreachable_phoenix_does_not_take_the_app_down(tmp_path, monkeypatch):
     monkeypatch.setattr(main, "setup_observability", _explode)
 
     with TestClient(main.app) as client:
-        health = client.get("/health").json()
-        assert health["status"] == "ok"
+        response = client.get("/health")
+        health = response.json()
+
+        # Asserted field by field rather than via the composite `status`,
+        # which since M3 also covers marketplace reachability -- so a green
+        # `status` here would mean "tracing AND mcp are both fine", and a
+        # degraded one would no longer isolate the thing this test is about.
+        assert response.status_code == 200
         assert health["tracing_enabled"] is False
+        assert health["llm_configured"] is True, "a tracing failure must not degrade the LLM path"
 
         # And the app still serves a session.
         with client.websocket_connect(f"/ws/{uuid.uuid4().hex[:8]}") as ws:

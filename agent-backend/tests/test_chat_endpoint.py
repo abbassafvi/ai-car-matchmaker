@@ -49,16 +49,26 @@ def test_full_round_trip_over_websocket(tmp_path):
             assert slots["category"]["value"] == "Sedan"
 
 
-def test_health_endpoint_reports_ok_when_configured(tmp_path, monkeypatch):
+def test_health_reports_llm_configured_and_marketplace_missing(tmp_path, monkeypatch):
+    """M3: `status` now covers the marketplace too, not just the LLM key.
+
+    With a key but no reachable mcp-services (the situation in CI), the
+    backend is genuinely only half-usable -- it can interview but cannot
+    research. Reporting `ok` there would have made a failed tool discovery
+    look identical to a logic bug at exactly the moment research silently
+    stopped happening.
+    """
     monkeypatch.setenv("LLM_API_KEY", "test-dummy-not-a-real-key")
     monkeypatch.setenv("SESSIONS_DB_PATH", str(tmp_path / "sessions.sqlite"))
+    monkeypatch.setenv("MCP_MARKETPLACE_URL", "http://127.0.0.1:9/mcp")  # nothing listens
     from api.main import app
 
     with TestClient(app) as client:
-        resp = client.get("/health")
-        assert resp.status_code == 200
-        assert resp.json()["status"] == "ok"
-        assert resp.json()["llm_configured"] is True
+        body = client.get("/health").json()
+        assert body["llm_configured"] is True
+        assert body["mcp_connected"] is False
+        assert body["marketplace_tools"] == []
+        assert body["status"] == "degraded"
 
 
 def test_backend_boots_and_reports_degraded_without_an_llm_key(tmp_path, monkeypatch):

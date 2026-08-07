@@ -64,26 +64,44 @@ TOOL_REGISTRY = {
 }
 
 
-def tools_for_phase(phase: Phase) -> list:
+def resolve_registry(extra_tools: list | None = None) -> dict:
+    """`TOOL_REGISTRY` plus any tools discovered at runtime (T024's MCP tools).
+
+    Returns a *new* dict. The module-level `TOOL_REGISTRY` is never mutated,
+    deliberately: it is the static, import-time mapping `test_phase_gate.py`
+    asserts against, and a lifespan that mutated it in place would make the
+    same assertion mean one thing under pytest and another under the running
+    app. Runtime tools are injected, not installed.
+    """
+    registry = dict(TOOL_REGISTRY)
+    for tool in extra_tools or []:
+        registry[tool.name] = tool
+    return registry
+
+
+def tools_for_phase(phase: Phase, registry: dict | None = None) -> list:
     """Resolve the phase gate's tool *names* to bound tool objects.
 
     Constitution Principle II is enforced right here: a tool the gate
     doesn't list for this phase is never handed to the model, so it cannot
     be called out of order regardless of what the model or a malicious
-    listing description tries to do.
+    listing description tries to do. Names come from the gate table in every
+    case -- `registry` only decides whether a named tool resolves to a real
+    object yet, never which names are permitted.
     """
+    resolved = TOOL_REGISTRY if registry is None else registry
     return [
-        TOOL_REGISTRY[name]
+        resolved[name]
         for name in tool_names_for_phase(phase)
-        if name in TOOL_REGISTRY
+        if name in resolved
     ]
 
 
-def build_agent_for_phase(phase: Phase, checkpointer, model=None):
+def build_agent_for_phase(phase: Phase, checkpointer, model=None, registry: dict | None = None):
     """Build the agent for a single phase, with only that phase's tools."""
     return create_deep_agent(
         model=model or build_model(),
-        tools=tools_for_phase(phase),
+        tools=tools_for_phase(phase, registry),
         system_prompt=PHASE_SYSTEM_PROMPTS[phase],
         state_schema=CarMatchmakerState,
         checkpointer=checkpointer,
@@ -101,17 +119,27 @@ class PhaseAgentRegistry:
     the bound tools and system prompt differ.
     """
 
-    def __init__(self, checkpointer):
+    def __init__(self, checkpointer, extra_tools: list | None = None):
         self._checkpointer = checkpointer
         self._model = build_model()
         self._agents: dict[Phase, object] = {}
+        # Tools discovered at startup (T024) are injected here rather than
+        # installed globally -- see resolve_registry.
+        self.extra_tools = list(extra_tools or [])
+        self._registry = resolve_registry(self.extra_tools)
 
     def for_phase(self, phase: Phase):
         if phase not in self._agents:
             self._agents[phase] = build_agent_for_phase(
-                phase, self._checkpointer, model=self._model
+                phase, self._checkpointer, model=self._model, registry=self._registry
             )
         return self._agents[phase]
+
+    def tool_names(self) -> set[str]:
+        """Every tool name this registry can resolve. Used by /health to
+        report whether the marketplace tools actually made it in.
+        """
+        return set(self._registry)
 
 
 def build_interview_agent(checkpointer):

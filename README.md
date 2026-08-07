@@ -13,11 +13,13 @@ Built for the Amulate Summer Hackathon 2026.
 M0 (scaffolding) + M1 (foundational) + M2 (conversational interview, User
 Story 1) + M2.5 (audit remediation) complete. **M3 (research & ranked
 recommendations, User Story 2) is in progress** — the marketplace MCP server
-is built and the agent runs fully async against it; ranking, the A2UI
-catalogue and the reasoning-steps surface are next.
+is built, the agent runs fully async against it, and interview → automatic
+research → deterministically ranked, explained recommendations now works end
+to end. Rendering those results as an **A2UI catalogue and reasoning-steps
+surface** is the remaining work.
 
-**80 automated tests**, of which **77 run with no external setup at all**
-(35 `mcp-services` + 42 `agent-backend`); the remaining 3 need a live LLM key
+**117 automated tests**, of which **114 run with no external setup at all**
+(35 `mcp-services` + 79 `agent-backend`); the remaining 3 need a live LLM key
 and/or a running Phoenix and auto-skip without them. Plus live end-to-end
 verification against a real Docker Compose build. See
 [`specs/001-ai-car-matchmaker/`](specs/001-ai-car-matchmaker/) for the full
@@ -71,9 +73,20 @@ the backend dying at startup.
 
 `mcp-services` now runs a real MCP server over Streamable HTTP exposing
 `search_listings` and `get_listing_details` over the 203-listing mock
-dataset; the booking and payment servers land in M4. The frontend is a
-production Vite build served by nginx, and `agent-backend` runs the actual
-FastAPI + DeepAgents agent.
+dataset; the booking and payment servers land in M4. The agent discovers
+those tools at startup, so `agent-backend`'s `/health` reports
+`mcp_connected` alongside `llm_configured` — `status` is `degraded` if
+either is missing.
+
+**How recommendations stay grounded**: once the interview is complete the
+backend runs the marketplace search itself, building the query from the
+saved interview slots rather than asking the model to restate them, and
+ranks the results in deterministic Python. The model receives the ranked
+records and explains them; it never originates a price, year or mileage.
+See [Constitution Principle I](.specify/memory/constitution.md).
+
+The frontend is a production Vite build served by nginx, and `agent-backend`
+runs the actual FastAPI + DeepAgents agent.
 
 ## Running tests locally
 

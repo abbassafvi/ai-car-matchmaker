@@ -371,7 +371,7 @@ python mcp-services/data/generate_listings.py
 | File | Purpose |
 |---|---|
 | `agent/state.py` | `Phase` (6), `InterviewState`, `SessionState`, `RankedRecommendation`, `Booking`, `PaymentConfirmation`. **`TOOLS_BY_PHASE` + `tool_names_for_phase()` are the phase gate**. `save_interview_slots()` **overwrites, never appends** |
-| `agent/graph.py` | (a) M1's minimal `build_graph()`/`compiled_graph()` persistence scaffold — **keep as-is**. (b) `TOOL_REGISTRY` (name→tool), `tools_for_phase()`, `build_agent_for_phase()`, **`PhaseAgentRegistry`**, `CarMatchmakerState(DeepAgentState)` carrying `session: dict`. **Phase C registers the MCP tools here** |
+| `agent/graph.py` | (a) M1's minimal `build_graph()`/`compiled_graph()` persistence scaffold — **keep as-is**. (b) `TOOL_REGISTRY` (name→tool), `tools_for_phase()`, `build_agent_for_phase()`, **`PhaseAgentRegistry(checkpointer, extra_tools=)`**, **`resolve_registry()`** (returns a new dict; never mutates `TOOL_REGISTRY`), `CarMatchmakerState(DeepAgentState)` carrying `session: dict` |
 | `agent/tools.py` | `save_interview_state` — a `@tool` returning a LangGraph `Command` |
 | `agent/prompts.py` | `PHASE_SYSTEM_PROMPTS` (a missing entry fails at startup). Listing-facing phases embed `UNTRUSTED_DATA_RULE` |
 | `agent/mcp_client.py` | **T024**: `discover_marketplace_tools()` — fail-soft MCP discovery, returns `[]` rather than raising. Never touches `TOOL_REGISTRY` |
@@ -771,10 +771,11 @@ For a new session, read in this order:
    Constitution Check table (**both** correction blocks)
 6. **`README.md`** — run instructions
 
-Then, before writing M3 Phase C code:
+Then, before writing M3 Phase D code:
 
 7. `mcp-services/marketplace/store.py` — the query logic and the untrusted-data wrapper
 8. `mcp-services/marketplace/server.py` — the MCP tool contract Phase C consumes
+8a. `agent-backend/agent/research.py` + `agent/ranking.py` — **Phase C's output is Phase D's input**: `SessionState.candidate_listings` (verbatim tool records) and `.recommendations` are exactly what T026 must render and T022 must snapshot against
 9. `mcp-services/tests/test_marketplace_server.py` — the exact `structured_content` shape
 10. `agent-backend/agent/state.py` — `TOOLS_BY_PHASE` gate + entity shapes
 11. `agent-backend/agent/graph.py` — `PhaseAgentRegistry`/`TOOL_REGISTRY`; **T024/T025 change this**
@@ -791,17 +792,14 @@ Then, before writing M3 Phase C code:
 >
 > This is the Amulate Summer Hackathon 2026 "AI Car Matchmaker" project.
 > M0–M2.5 are complete. **M3 (User Story 2) is in progress**: Phase A (async
-> agent path) and Phase B (T020/T023, marketplace MCP server) are done, tested
-> and pushed to `main`. **Continue from M3 Phase C (T024 + T025)**,
-> described in HANDOFF §10.
->
-> Note that §10 carries a 🔴 **open decision I have to make before you write
-> T025** — whether the first marketplace search is code-driven or
-> model-driven. Put the recommendation to me; don't pick for me.
+> agent path), Phase B (T020/T023, marketplace MCP server) and Phase C
+> (T024/T025, MCP wiring + code-driven search + deterministic ranking) are
+> done, tested and pushed to `main`. **Continue from M3 Phase D (T026 +
+> T022)**, described in HANDOFF §10.
 >
 > Do **not** write code immediately. First confirm you have full context and
 > tell me anything in the docs that looks wrong, stale, or self-contradictory —
-> three separate audits have now found docs asserting behaviour the code did
+> four separate audits have now found docs asserting behaviour the code did
 > not have (HANDOFF §3), so treat the docs as claims to verify.
 >
 > Notes:

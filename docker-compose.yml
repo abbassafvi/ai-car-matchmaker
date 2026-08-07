@@ -22,5 +22,7 @@ services:
   phoenix:
     image: arizephoenix/phoenix:latest
     ports:
-      - "6006:6006"
-      - "4317:4317"
+      # host ports shifted to avoid colliding with a pre-existing
+      # phoenix-mind-service container on the dev host using 6006/4317
+      - "16006:6006"
+      - "14317:4317"

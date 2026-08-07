@@ -40,7 +40,7 @@ docker compose up --build
 | Frontend | http://localhost:3000 |
 | Agent backend (health) | http://localhost:8000 |
 | MCP services (health) | http://localhost:8100 |
-| Phoenix (traces UI) | http://localhost:6006 |
+| Phoenix (traces UI) | http://localhost:16006 |
 
 Currently all services are M0 health-check stubs — real functionality
 lands milestone by milestone per `tasks.md`. This section will be updated

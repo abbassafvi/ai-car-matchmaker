@@ -1,0 +1,22 @@
+# Spec-kit's own security note: agent folders can hold credentials/local state
+.claude/
+.specify/.gitignore
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+*.egg-info/
+
+# Node
+node_modules/
+dist/
+
+# Env / secrets
+.env
+.env.*
+*.sqlite
+*.db
+
+# OS
+.DS_Store

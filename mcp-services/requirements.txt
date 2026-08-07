@@ -1,0 +1,2 @@
+# Placeholder for M0. Real dependencies land in M1 per
+# specs/001-ai-car-matchmaker/plan.md: mcp (Python SDK), starlette, uvicorn

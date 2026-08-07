@@ -1,0 +1,26 @@
+services:
+  frontend:
+    build: ./frontend
+    ports:
+      - "3000:80"
+    depends_on:
+      - agent-backend
+
+  agent-backend:
+    build: ./agent-backend
+    ports:
+      - "8000:8000"
+    depends_on:
+      - mcp-services
+      - phoenix
+
+  mcp-services:
+    build: ./mcp-services
+    ports:
+      - "8100:8100"
+
+  phoenix:
+    image: arizephoenix/phoenix:latest
+    ports:
+      - "6006:6006"
+      - "4317:4317"

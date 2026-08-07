@@ -1,0 +1,4 @@
+# Placeholder for M0. Real dependencies land in M1/M2 per
+# specs/001-ai-car-matchmaker/plan.md ("Primary Dependencies"):
+#   langchain, deepagents, mcp, langchain-mcp-adapters, fastapi, uvicorn,
+#   arize-phoenix-otel, openinference-instrumentation-langchain

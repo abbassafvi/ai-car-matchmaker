@@ -117,7 +117,7 @@ account before assuming a code bug.
 
 **Git log** (main, clean, synced with origin):
 ```
-e31fbdc  M3 Phase C (T024, T025): MCP wiring, code-driven search, ranking
+dd7ab4a  M3 Phase C (T024, T025): MCP wiring, code-driven search, ranking
 8e44793  M3 Phase C pre-flight audit: fix test collection, correct stale docs
 2fa9fcf  docs: bring HANDOFF/README/plan/tasks up to M3 Phase B state
 c6915fd  M3 Phase B (T020, T023): marketplace MCP server over Streamable HTTP

@@ -242,11 +242,14 @@ execution is inert and the host is untouched. `test_phase_gate.py` pins
 both the built-in set and the absence of `StateBackend.execute` so a
 dependency upgrade that widens the agent's reach fails loudly.
 
-**Checkpoint**: 53 automated tests, up from 30. 47 pass with no external
-setup (39 agent-backend + 8 mcp-services); all 53 pass with a live LLM key
-and Phoenix running — verified live, including 8 real spans landing in
-Phoenix for one session (LLM calls + the `save_interview_state` tool call),
-where the pre-M2.5 code produced zero.
+**Checkpoint**: 53 automated tests, up from 30. ~~47 pass with no external
+setup (39 agent-backend + 8 mcp-services)~~ → **corrected at M3 start: 50
+pass with no external setup (42 agent-backend + 8 mcp-services), and there
+are exactly 3 credential/Phoenix-gated tests, not 6.** The original figures
+were never measured. All 53 pass with a live LLM key and Phoenix running —
+verified live, including 8 real spans landing in Phoenix for one session
+(LLM calls + the `save_interview_state` tool call), where the pre-M2.5 code
+produced zero.
 
 ---
 
@@ -258,17 +261,47 @@ where the pre-M2.5 code produced zero.
 **Independent Test**: Per spec.md US2 — seeded interview state, verify hard
 filters + reasoning + exact-value A2UI rendering.
 
-### 🔴 Open decision before starting (unanswered)
+### ✅ Quota decision — RESOLVED
 
-T021 and T029 are **behavioral** tests needing many live LLM calls, and the
-Gemini free tier allows ~20 requests/day/model. T029 is the one that actually
-proves Principle IV. Three options were put to the user, who deferred:
+The blocker was that T021/T029 are **behavioral** tests needing many live LLM
+calls against a ~20 req/day Gemini free tier. Resolved by **switching the
+development provider to Groq** (`openai/gpt-oss-120b`, ~1000 req/day), which
+was verified end-to-end through the real agent path including the multi-turn
+tool calling that Gemini's compat endpoint and NVIDIA NIM both failed.
 
-1. Build M3 now, write T021/T029 to auto-skip until a billed key exists.
-2. User provides a billed key first; exercise both live throughout.
-3. Scripted fake model for the behavioral tests + a thin live smoke test.
+Consequences:
+- Phases C–E cost **zero** LLM requests (all deterministic).
+- T021/T029 are exercised **live**, not deferred and not faked. Recommended
+  shape for each: an always-on deterministic half so CI never depends on a
+  key, plus a live-gated half that is the recorded proof.
+- Gemini's ~20/day is reserved for demo rehearsal and final verification.
+- Run T029 on Groq **and** once on whatever model actually ships — an
+  injection result is only evidence for the model it ran on.
+- ⚠️ Groq rate-limits on **tokens per minute** (8000 for `gpt-oss-120b`), and
+  DeepAgents' 10 bound tool schemas cost ~2.7k tokens per request. Keep the
+  model's candidate slate short.
 
-**Resolve this before writing M3 code.**
+### Phase A (added, not in the original plan) — async agent path
+
+Not a numbered task, but a **blocking prerequisite** discovered when the
+`langchain-mcp-adapters` API was verified before designing T024 against it:
+
+- Adapted MCP tools are **async-only** (`StructuredTool(coroutine=...,
+  func=None)`). Sync `.invoke()` raises, *including inside an
+  `asyncio.to_thread` worker* — so T053's
+  `await asyncio.to_thread(agent.invoke, ...)` could not survive M3.
+- That forces `agent.ainvoke`, which rules out the sync `SqliteSaver`
+  (`aget_tuple`/`aput`/`alist` all raise `NotImplementedError`).
+- `api/main.py` now uses **`AsyncSqliteSaver`** + `aget_state` throughout.
+  `test_graph_persistence.py` keeps the sync saver against the same file and
+  schema, so the M1 persistence contract stays covered in isolation.
+- Also: per-provider `max_tokens` (Groq throttles on tokens/minute; 4096 →
+  39s/68s per turn, 1024 → 2.2s/1.7s), and `.gitignore` coverage for the
+  `-wal`/`-shm` sidecars `AsyncSqliteSaver`'s WAL mode writes.
+
+Committed as `dea1576`. Verified with 53/53 tests green plus a live
+WebSocket session (two turns, correct overwrite semantics, session resumed
+on a fresh connection, 16 real spans in Phoenix).
 
 ### What M2.5 already did for M3
 
@@ -331,16 +364,40 @@ proves Principle IV. Three options were put to the user, who deferred:
       serialises into the model's context — the agent side never gets a
       chance to wrap it later. Confirmed live that the `ADV-0001` payload
       arrives *inside* the delimiters.
-- [ ] T024 [US2] `agent-backend`: `langchain-mcp-adapters` wiring — verify
-      current API against plan.md's flagged NEEDS VERIFICATION item, adjust
-      integration code accordingly
-- [ ] T025 [US2] `agent-backend/agent/graph.py`: RESEARCHING phase node
-      (search → rank → reasoning generation), RESULTS_READY transition
+- [ ] T024 [US2] `agent-backend`: `langchain-mcp-adapters` wiring.
+      **API verification is DONE** (see HANDOFF §8.1–8.7) — the NEEDS
+      VERIFICATION flag is cleared; don't re-research it. Shape:
+      `MultiServerMCPClient({"marketplace": {"transport": "streamable_http",
+      "url": MCP_MARKETPLACE_URL}})` then `await client.get_tools()`.
+      Remaining work: promote `langchain-mcp-adapters>=0.3.2,<0.4` and
+      `mcp>=1.24,<2` from a comment to real entries in
+      `agent-backend/requirements.txt`; fetch tools **once in the FastAPI
+      lifespan** and inject into `TOOL_REGISTRY` *before* `PhaseAgentRegistry`
+      is built (agents fix their tools at construction); make it fail-soft so
+      mcp-services being down degrades research rather than killing the
+      backend. `MCP_MARKETPLACE_URL` is already passed by docker-compose.
+- [ ] T025 [US2] `agent-backend/agent/graph.py`: RESEARCHING phase behaviour
+      (search → rank → reasoning), RESULTS_READY transition. Two decisions
+      already taken: **(a) ranking is deterministic Python, not the LLM** —
+      `RankedRecommendation` is built from the tool artifact's structured
+      fields, per spec.md's own entity definition ("never independently
+      authored by the LLM"), which also keeps prompts small against Groq's
+      TPM ceiling; **(b) research must auto-kick-off** in the same turn the
+      interview completes — today the phase flips but nothing runs until the
+      user sends another message, contradicting spec.md US1 AS3 ("no further
+      user prompt required to proceed"). Register the MCP tools in
+      `TOOL_REGISTRY`; the gate already names them, so `test_phase_gate.py`
+      starts covering them automatically. Consider passing deny-all
+      `permissions=` to `create_deep_agent` (Principle IV; note it does not
+      reduce token cost — the schemas stay bound).
 - [ ] T026 [US2] `agent-backend/agent/render_a2ui.py`: reasoning-steps
       surface (distinct from catalogue) + catalogue surface, both fed from
       structured tool output only
 - [ ] T027 [US2] `mcp-apps-ui/listing-detail/`: optional MCP App iframe for
-      single-listing deep-dive (the "marketplace access as MCP App" choice)
+      single-listing deep-dive (the "marketplace access as MCP App" choice).
+      **Recommended deferred past M4a/M4b**: this is the explicitly *additive
+      secondary* surface, while the booking-form and checkout MCP Apps are
+      hackathon hard requirements #3 and #4.
 - [ ] T028 [US2] `frontend`: render reasoning-steps + catalogue surfaces;
       wire listing selection back to the agent
 - [ ] T029 [US2] Security test: T011's seeded adversarial listings produce

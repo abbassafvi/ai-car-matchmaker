@@ -23,9 +23,14 @@ on Node 22, build-time only (mcp-apps-ui bundles, frontend)
 **Primary Dependencies**: `langchain`, `deepagents` (LangGraph),
 `langchain-google-genai` (primary LLM client) and `langchain-openai`
 (alternative providers — see LLM Provider note below), `mcp`
-(Python SDK, Streamable HTTP transport), `langchain-mcp-adapters` (MCP
-tools → LangChain tool adapters — still **NEEDS VERIFICATION** in M3, not
-yet used), `arize-phoenix-otel`, `openinference-instrumentation-langchain`,
+(Python SDK, Streamable HTTP transport — **pinned `>=1.24,<2`**, because
+`langchain-mcp-adapters` 0.3.x requires `mcp<2.0.0` while `mcp` 2.0.0 is
+already on PyPI, so an unpinned install splits the two sides of the
+protocol across a major version), `langchain-mcp-adapters` (MCP tools →
+LangChain tool adapters — **VERIFIED at M3 start** against 0.3.2, see
+HANDOFF §8.1–8.7; the adapters produce async-only tools, which is what
+forced the whole agent path to `ainvoke`), `arize-phoenix-otel`,
+`openinference-instrumentation-langchain`,
 React + Vite, `@a2ui/react` + `@a2ui/web_core` (v0_9 subpath —
 **resolved**: this is a real published npm package, not a hand-rolled Lit
 embed as originally planned; see M2 findings in tasks.md),
@@ -61,7 +66,13 @@ Credentials via `agent-backend/.env` (gitignored, never committed —
 `.env.example` documents the required keys).
 
 **Storage**: SQLite — one file for the LangGraph checkpointer (session
-state), one for the mock listings dataset
+state), one JSON file for the mock listings dataset. The runtime
+checkpointer is **`AsyncSqliteSaver`** (M3 Phase A): MCP-adapted tools are
+async-only, which forces `agent.ainvoke`, and the sync `SqliteSaver` raises
+`NotImplementedError` on every async method. It runs in WAL mode, so the
+`.sqlite-wal`/`.sqlite-shm` sidecars are gitignored alongside the db.
+`test_graph_persistence.py` deliberately keeps using the sync saver against
+the same file and schema, to cover the persistence contract in isolation.
 
 **Testing**: `pytest` (agent-backend, mcp-services), Playwright (E2E across
 the full stack), `vitest` (frontend/mcp-apps-ui units)

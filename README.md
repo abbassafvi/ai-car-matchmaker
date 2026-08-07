@@ -11,11 +11,15 @@ Built for the Amulate Summer Hackathon 2026.
 ## Status
 
 M0 (scaffolding) + M1 (foundational) + M2 (conversational interview, User
-Story 1) + M2.5 (audit remediation) complete — **53 automated tests**, of
-which **50 run with no external setup at all** (42 `agent-backend` +
-8 `mcp-services`); the remaining 3 need a live LLM key and/or a running
-Phoenix and auto-skip without them. Plus live end-to-end verification
-against a real Docker Compose build. See
+Story 1) + M2.5 (audit remediation) complete. **M3 (research & ranked
+recommendations, User Story 2) is in progress** — the marketplace MCP server
+is built and the agent runs fully async against it; ranking, the A2UI
+catalogue and the reasoning-steps surface are next.
+
+**80 automated tests**, of which **77 run with no external setup at all**
+(35 `mcp-services` + 42 `agent-backend`); the remaining 3 need a live LLM key
+and/or a running Phoenix and auto-skip without them. Plus live end-to-end
+verification against a real Docker Compose build. See
 [`specs/001-ai-car-matchmaker/`](specs/001-ai-car-matchmaker/) for the full
 spec-driven-development trail:
 
@@ -61,13 +65,15 @@ the backend dying at startup.
 | Frontend | http://localhost:3000 |
 | Agent backend (health) | http://localhost:8000/health |
 | Agent backend (chat) | ws://localhost:8000/ws/{session_id} |
-| MCP services (health, M0 stub) | http://localhost:8100 |
+| MCP services (health) | http://localhost:8100/health |
+| MCP services (protocol) | http://localhost:8100/mcp |
 | Phoenix (traces UI) | http://localhost:16006 |
 
-`mcp-services` is still an M0 health-check stub — real marketplace/booking/
-payment MCP servers land in M3/M4. Everything else is real: the frontend is
-a production Vite build served by nginx, `agent-backend` runs the actual
-FastAPI + DeepAgents interview agent.
+`mcp-services` now runs a real MCP server over Streamable HTTP exposing
+`search_listings` and `get_listing_details` over the 203-listing mock
+dataset; the booking and payment servers land in M4. The frontend is a
+production Vite build served by nginx, and `agent-backend` runs the actual
+FastAPI + DeepAgents agent.
 
 ## Running tests locally
 
@@ -94,7 +100,7 @@ failure, but check the provider account before assuming a code bug.
 
 - **Agent harness**: [LangChain DeepAgents](https://docs.langchain.com/labs/deep-agents/overview) (LangGraph)
 - **LLM provider**: config, not code. `LLM_PROVIDER=google` uses [Google Gemini](https://ai.google.dev/) via the native `langchain-google-genai` client (default `gemini-3.6-flash`); `LLM_PROVIDER=openai_compatible` uses any OpenAI-compatible API. Development runs on [Groq](https://groq.com/) (`openai/gpt-oss-120b`) because its free tier allows ~1000 requests/day against Gemini's ~20, keeping the scarce Gemini quota for demo rehearsal
-- **Tool protocol**: [MCP](https://modelcontextprotocol.io/) (Python SDK, Streamable HTTP) — M3+
+- **Tool protocol**: [MCP](https://modelcontextprotocol.io/) (Python SDK, Streamable HTTP) — marketplace server live; booking/payment in M4
 - **In-chat transactional UI**: [MCP Apps](https://apps.extensions.modelcontextprotocol.io/) — booking form + mock checkout (sandboxed iframes) — M4
 - **Generative UI**: [A2UI](https://a2ui.org/) v0.9 protocol via the real [`@a2ui/react`](https://www.npmjs.com/package/@a2ui/react) renderer — car catalogue + live agent progress/reasoning
 - **Observability**: [Arize Phoenix](https://arize.com/docs/phoenix) via OpenTelemetry

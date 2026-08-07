@@ -5,8 +5,12 @@ continue this project with zero re-discovery and without repeating mistakes
 already made and fixed. Read this file first, then the files listed in
 [§13 Required reading](#13-required-reading).
 
-**Last updated**: 2026-08-08, after **M2.5** (audit remediation) shipped and
-was pushed (`fc54d31`).
+**Last updated**: 2026-08-08, after **M3 Phase B** shipped and was pushed
+(`c6915fd`). M3 is *in progress* — Phases A and B are done, C–F are not.
+
+> **Treat every claim in this file as a claim, not as truth.** Three separate
+> audits have now found docs asserting behaviour the code did not have. The
+> numbers below were measured on 2026-08-08, not copied forward. See §3.
 
 ---
 
@@ -26,15 +30,15 @@ and a *mocked* checkout **without leaving the chat**.
 
 | # | Requirement | Status |
 |---|---|---|
-| 1 | Multistep agent: interview → research → ranked+explained recommendations | 🟡 interview done; research = M3 |
+| 1 | Multistep agent: interview → research → ranked+explained recommendations | 🟡 interview done; marketplace tools done; ranking + surfacing = M3 Phase C/D |
 | 2 | Interview captures: use case, car type/category, budget, buy-vs-rent, target date | ✅ |
 | 3 | **Form-filling MUST be an MCP App** rendered inside the chat | ⬜ M4a |
 | 4 | **Mock payment/checkout MUST be an MCP App** rendered inside the chat | ⬜ M4b |
-| 5 | Car catalogue + live agent progress (interview state, search status, **reasoning steps**) MUST render via **A2UI** — explicitly *"not static HTML"* | 🟡 progress surface live; catalogue + reasoning = M3 |
+| 5 | Car catalogue + live agent progress (interview state, search status, **reasoning steps**) MUST render via **A2UI** — explicitly *"not static HTML"* | 🟡 progress surface live; catalogue + reasoning = M3 Phase D |
 | 6 | No real payments, no BMW Group APIs — checkout fully mocked | ✅ by construction |
 | 7 | Mock marketplace: **≥100 listings, ≥10 categories, ≥10 brands per category** | ✅ 203 / 10 / 20 |
-| 8 | Maintain state across interview/research/recommendation (multistep memory) | ✅ checkpointer proven across restart + session isolation |
-| 9 | Approved harness: Claude Agent SDK **or LangChain DeepAgents** or OpenAI Agents SDK | ✅ DeepAgents |
+| 8 | Maintain state across interview/research/recommendation (multistep memory) | ✅ checkpointer proven across restart + session isolation + live WS reconnect |
+| 9 | Approved harness: Claude Agent SDK **or LangChain DeepAgents** or OpenAI Agents SDK | ✅ DeepAgents (see §8.4b — this constrains us) |
 | 10 | Spec-driven development (e.g. GitHub spec-kit) | ✅ full trail |
 | 11 | Ship as Docker container **or** deployed public app | ✅ `docker compose up` verified |
 | 12 | Public GitHub repo, documented, README with run instructions | ✅ |
@@ -46,13 +50,14 @@ and a *mocked* checkout **without leaving the chat**.
 
 | Decision | Choice | Rationale |
 |---|---|---|
-| Agent harness | **LangChain DeepAgents** | User's explicit choice |
+| Agent harness | **LangChain DeepAgents** | User's explicit choice + requirement #9 |
 | Marketplace data | **Mock dataset** | Reliability for demo; no API keys/rate limits |
 | Marketplace access | **Also built as an MCP App** | User's explicit choice (spec allows plain API, user opted for the richer path) |
 | Observability | **Arize Phoenix** | User's explicit choice; OSS, self-hosts in compose |
 | Frontend | **React + Vite**, `@a2ui/react` renderer | See §8 |
 | MCP server language | **Python** (MCP Python SDK) | Keeps backend single-language |
-| Session store | LangGraph **SqliteSaver** | Zero external infra, real persistence |
+| Session store | LangGraph **AsyncSqliteSaver** | Zero external infra, real persistence (was SqliteSaver — see §3) |
+| LLM provider (dev) | **Groq**, `openai/gpt-oss-120b` | ~1000 req/day vs Gemini's ~20 — see §5 |
 | Push cadence | **Commit + push after each milestone, pre-authorized** | User approved; no per-push confirmation needed |
 
 ### Resolved architectural ambiguity (important)
@@ -63,40 +68,48 @@ render HTML in an iframe; A2UI mandates non-HTML declarative UI). **Resolution
 agreed with the user:**
 
 - Marketplace **MCP tools** (`search_listings`, `get_listing_details`) = the
-  "protocol-based tool access" requirement.
-- The **primary catalogue + progress + reasoning-steps surfaces = A2UI** (satisfies
-  the "not static HTML" clause).
+  "protocol-based tool access" requirement. ✅ **built, M3 Phase B**
+- The **primary catalogue + progress + reasoning-steps surfaces = A2UI**
+  (satisfies the "not static HTML" clause).
 - The marketplace MCP App's `ui://` resource is a *secondary* surface (a rich
   single-listing detail/compare view), additive rather than a competing
-  implementation of the catalogue.
+  implementation of the catalogue. **Recommended: defer past M4** (see §10).
 
 ---
 
-## 2. Current status: M0, M1, M2, M2.5 complete
+## 2. Current status
 
 ```
 M0   ✅ spec-kit scaffolding, constitution, spec/plan/tasks, 4-service compose skeleton
 M1   ✅ mock dataset generator, session-state schemas, checkpointer persistence, Phoenix tracing
 M2   ✅ Conversational Interview (User Story 1) — DeepAgents agent, A2UI surface, WebSocket API, React frontend
-M2.5 ✅ Audit remediation — see §3. Two Constitution principles were recorded
-        as PASS in plan.md while having no production code path at all.
-M3   ⬜ NEXT — Research & Ranked Recommendations (User Story 2), T020–T029
+M2.5 ✅ Audit remediation — see §3
+M3   🟡 IN PROGRESS — Research & Ranked Recommendations (User Story 2)
+       ✅ Phase A  async agent path (blocking prerequisite, see §3)
+       ✅ Phase B  T020 + T023 marketplace MCP server
+       ⬜ Phase C  T024 + T025 adapter wiring, ranking, research auto-kickoff
+       ⬜ Phase D  T026 + T022 A2UI catalogue + reasoning surfaces
+       ⬜ Phase E  T028 frontend rendering + listing selection
+       ⬜ Phase F  T021 + T029 live behavioural tests
+       ⬜ (T027 listing-detail MCP App — recommended deferred past M4)
 M4a  ⬜ Booking form MCP App (User Story 3)
 M4b  ⬜ Mock checkout MCP App (User Story 4)
 M4c  ⬜ Session resume (User Story 5)
-M5   ⬜ Evals (observability itself is now wired, M2.5/T051)
+M5   ⬜ Evals (observability itself is wired, M2.5/T051)
 M6   ⬜ Hardening, E2E tests, README finalization, deck, demo video
 ```
 
-**Test suite**: 53 total.
-- **50 pass with no external setup** — 42 `agent-backend` + 8 `mcp-services`
-- **All 53 pass** with a live LLM key *and* Phoenix running (verified 2026-08-08)
-- Exactly **3** tests are credential/Phoenix-gated (`grep -rn skipif tests/`):
-  `test_interview_agent`, `test_chat_endpoint`, `test_otel_setup`
+**Test suite: 80 total** (measured 2026-08-08, not copied forward).
 
-*(An earlier version of this file claimed 47 pass / 39 agent-backend / 6
-gated. All three numbers were wrong — corrected at M3 start by running the
-suite rather than trusting the doc.)*
+| Suite | Tests | Gated | Files |
+|---|---|---|---|
+| `mcp-services` | **35** | 0 | `test_generate_listings` (8), `test_marketplace` (18), `test_marketplace_server` (9) |
+| `agent-backend` | **45** | 3 | 11 modules, see §7 |
+
+- **77 pass with no external setup** (35 + 42)
+- **All 80 pass** with a live LLM key *and* Phoenix running — verified 2026-08-08
+- Exactly **3** gated tests (`grep -rn skipif */tests/`): `test_interview_agent`
+  and `test_chat_endpoint` (need `LLM_API_KEY`), `test_otel_setup` (needs Phoenix)
 
 ⚠️ The credential gate checks key **presence** only. With a key set but out
 of quota, the live tests **fail** rather than skip. Check the provider
@@ -104,38 +117,63 @@ account before assuming a code bug.
 
 **Git log** (main, clean, synced with origin):
 ```
+c6915fd  M3 Phase B (T020, T023): marketplace MCP server over Streamable HTTP
+dea1576  M3 Phase A: async agent path, provider-aware token caps, doc corrections
+c208807  docs: rewrite HANDOFF for M2.5 state and flag M3's open quota decision
 fc54d31  M2.5 follow-up: fix enum/float leaking into the A2UI progress surface
 b5a0bcb  M2.5: audit remediation — wire observability and the phase gate, swap LLM provider
-fa5faec  Add HANDOFF.md — full session context transfer document
 6cef214  M2: Conversational Interview (User Story 1) end to end
-33598e6  M1: mock dataset, session-state schema, checkpointer persistence, tracing
-4c70a45  M0 audit fixes: track .specify/.gitignore, sync task checkboxes, document dataset assumption
 ```
 
 ---
 
-## 3. M2.5 — what the pre-M3 audit found (read before trusting any doc)
+## 3. The recurring failure mode — read before trusting any doc
 
-A full audit (fresh clone, fresh venv, fresh Docker build, live stack, live
-WebSocket session) ran before M3. It found that **plan.md's Constitution
-Check table recorded two principles as PASS while the code had no such path
-at all**:
+**Docs in this repo have three times asserted behaviour the code did not
+have.** Each was found by running things, never by reading.
 
-| Was claimed | Reality found | Now |
-|---|---|---|
-| Principle V — "OTel registration is process-level init" | `setup_observability()` had **zero** production callers. A live session against the running stack produced **zero spans** in Phoenix. FR-012 and the observability *bonus* were unmet. | Called from FastAPI lifespan *before* any agent is built; fail-soft. Verified: **8 real spans** for one session. `test_observability_wiring.py` |
-| Principle II — "tool list is filtered per-phase in graph.py" | `available_tools()` had **zero** production callers; `build_interview_agent()` hardcoded its tools. | `TOOLS_BY_PHASE` is the single gate; `PhaseAgentRegistry` builds one agent per phase from it. `test_phase_gate.py` |
+### Found by the M2.5 audit (fixed in M2.5)
 
-Also fixed: `agent.invoke()` blocking the async event loop (serialized all
-concurrent sessions); backend dying at startup without an API key; frontend
-Docker build ignoring `package-lock.json`; no guard that committed
-`listings.json` matched its generator; Gemini content-blocks sent where the
-frontend expects a string; `TransactionType.BUY` / `30000.0` shown to users.
+| Was claimed | Reality found |
+|---|---|
+| Principle V — "OTel registration is process-level init" | `setup_observability()` had **zero** production callers; a live session produced **zero** spans in Phoenix. Now called from FastAPI lifespan; verified with real spans. |
+| Principle II — "tool list is filtered per-phase in graph.py" | `available_tools()` had **zero** production callers; `build_interview_agent()` hardcoded its tools. Now `TOOLS_BY_PHASE` + `PhaseAgentRegistry`. |
 
-**Lesson worth keeping**: "tests pass" and "a table says PASS" did not mean
-the feature existed. What caught both was **running the live stack and
-querying Phoenix for actual spans**, plus **grepping for call sites** of
-functions the docs claimed were load-bearing. Do this again before M4.
+### Found by the M3 pre-flight review (fixed in M3 Phase A/B)
+
+| Was claimed | Reality found |
+|---|---|
+| plan.md row I — Principle I "PASS" | PASS for a *mechanism*, not the principle. `render_a2ui.py` is genuinely deterministic, but every value it had ever rendered came from the user's own interview answers — **no listing price or spec had ever passed through it**. Downgraded to PARTIAL until T022/T026. |
+| plan.md row IV — "delimiters are in every listing-facing prompt" | `<untrusted_listing_data>` appeared **exactly twice** in the repo: the prompt telling the model how to treat delimited content, and the test asserting the prompt says so. **Nothing wrapped anything.** Fixed in Phase B — the MCP server now wraps `description` at the tool-output boundary. |
+| Test counts (3 files) | Claimed 47 pass / 39 agent-backend / 6 gated. Actual at the time: 50 / 42 / 3. |
+| HANDOFF — "the interview agent keeps running after the phase flips" | False. `api/main.py` *does* switch agents on the persisted phase. The real gaps were that the RESEARCHING agent bound zero domain tools, and nothing triggers research without another user message. |
+| HANDOFF layout note — several dirs "don't exist yet" | They exist on disk (empty, so git doesn't track them). |
+
+**Lessons worth keeping:**
+1. A test asserting *a prompt contains a rule* proves the rule was written,
+   not that it is enforced. Grep for the thing the rule describes.
+2. A Constitution gate row is only meaningful against the **subject matter**
+   of its principle. "Deterministic renderer exists" ≠ "listing prices are
+   grounded" if no listing has ever been rendered.
+3. **Grep for call sites** of any function a doc calls load-bearing.
+4. Run the live stack and query Phoenix for actual spans.
+5. When a test fails against real data, suspect the data/spec before the test.
+   That is how the dataset bug in §3b was found.
+
+### 3b. The dataset could not satisfy the spec (fixed in Phase B)
+
+spec.md US2 AS1 — the **headline acceptance scenario for this very
+milestone** — specifies *category=SUV, budget=$25,000, transaction_type=buy*.
+That matched **zero listings**: every `CATEGORY_PROFILE` floor was a new-car
+price, so the cheapest SUV was $26,380 and both sub-$30k SUVs were rent-only.
+Every demo would have opened with the "sorry, relaxing a constraint" path.
+
+Fixed by lowering category floors to create a used/budget tier and deriving
+price from age + mileage instead of drawing it independently (the flat random
+bands could price a pristine 2026 listing below a worn 2022 one, which also
+left the ranking layer with no real signal to explain). **Ceilings, `SEED`,
+listing/category/brand counts and the three `ADV-*` probes are unchanged.**
+AS1 now matches 4 listings. Reversible: one constant table + regenerate.
 
 ---
 
@@ -144,28 +182,30 @@ functions the docs claimed were load-bearing. Do this again before M4.
 ```
 ┌──────────────── frontend (React + Vite, port 3000) ────────────────┐
 │  chat shell (src/App.tsx)                                          │
-│   ├─ @a2ui/react renderer  → interview progress, catalogue,        │
-│   │                           reasoning steps  [A2UI protocol v0.9] │
+│   ├─ @a2ui/react renderer  → interview progress ✅,                 │
+│   │                          catalogue + reasoning ⬜ (Phase D/E)   │
 │   └─ MCP Apps host (M4)    → sandboxed iframes: booking, checkout  │
 └───────────────────────────────┬────────────────────────────────────┘
                     WebSocket /ws/{session_id}
 ┌───────────────────────────────▼────────────────────────────────────┐
-│  agent-backend (Python 3.14, FastAPI, port 8000)                   │
+│  agent-backend (Python 3.14, FastAPI, port 8000)   ASYNC ALL-THE-WAY│
 │   ├─ agent/graph.py       PhaseAgentRegistry: one agent per phase  │
 │   ├─ agent/tools.py       save_interview_state (Command-based)     │
 │   ├─ agent/state.py       SessionState + TOOLS_BY_PHASE gate       │
 │   ├─ agent/prompts.py     PHASE_SYSTEM_PROMPTS + UNTRUSTED_DATA_RULE│
 │   ├─ agent/render_a2ui.py deterministic domain → A2UI JSON         │
-│   ├─ agent/llm.py         Gemini via langchain-google-genai        │
-│   ├─ api/main.py          WebSocket bridge + message_text()        │
-│   └─ SqliteSaver checkpointer → /app/data/sessions.sqlite (volume) │
+│   ├─ agent/llm.py         provider-selected; per-provider max_tokens│
+│   ├─ api/main.py          WebSocket bridge, agent.ainvoke()        │
+│   └─ AsyncSqliteSaver → /app/data/sessions.sqlite (volume, WAL)    │
 └──────┬─────────────────────────────────────────┬───────────────────┘
-       │ (M3: MCP Streamable HTTP)               │ OTel gRPC
+       │ MCP Streamable HTTP ✅ (Phase B)         │ OTel gRPC
 ┌──────▼──────────────────────┐        ┌─────────▼──────────┐
 │ mcp-services (port 8100)    │        │ phoenix            │
-│  marketplace / booking /    │        │ UI    :16006       │
-│  payment MCP servers        │        │ OTLP  :14317       │
-│  + data/listings.json (203) │        └────────────────────┘
+│  marketplace/ ✅ FastMCP     │        │ UI    :16006       │
+│    store.py  query logic    │        │ OTLP  :14317       │
+│    server.py MCP tools      │        └────────────────────┘
+│  booking/ ⬜  payment/ ⬜     │
+│  + data/listings.json (203) │
 └─────────────────────────────┘
 ```
 
@@ -186,57 +226,56 @@ ports are unchanged (6006/4317).
 | Docker | 29.6.1, Compose v5.3.1 |
 | Git | 2.53.0, user `Abbas` / `mohdabbassafvi23@gmail.com` |
 | **`gh` CLI** | **NOT INSTALLED**, and `sudo apt-get` **fails** (no TTY for auth). Use the **GitHub REST API via `curl`** instead. |
-| GitHub token | In `~/.git-credentials` (scope: `repo`). Extract with:<br>`TOKEN=$(sed -nE 's#https://([^:@]+:)?([^@]+)@github.com#\2#p' ~/.git-credentials \| head -1)` |
+| GitHub token | In `~/.git-credentials` (scope: `repo`) |
 | `uv` / `specify` | Installed at `~/.local/bin` — `export PATH="$HOME/.local/bin:$PATH"` |
 | spec-kit CLI flag | It is `--integration claude`, **not** `--ai`; also needs `--ignore-agent-tools` here |
 | ⚠️ Sandbox | Outbound POSTs to LLM providers **fail inside the default tool sandbox**. Live-LLM commands need `dangerouslyDisableSandbox: true`. `GET`s often work, which makes this confusing — a provider "outage" is usually this. |
+| `.claude/launch.json` | **Exists and works** (`agent-backend` on 8000, `frontend` on 3000). Note `.claude/` is gitignored, so it will not survive a fresh clone. |
 
-**Secrets**: `agent-backend/.env` holds `LLM_API_KEY` (gitignored, `chmod 600`,
-verified absent from both the built image and the JS bundle).
-`agent-backend/.env.example` is the committed no-secrets template. Never
-commit real values; never echo the key into logs or traces. **Scan staged
-diffs before committing** (`git diff --cached | grep -E "^\+" | grep -E "<key pattern>"`).
+**Secrets**: `agent-backend/.env` (gitignored, `chmod 600`, verified absent from
+both the built image and the JS bundle). `.env.example` is the committed
+no-secrets template. **Scan staged diffs before committing** — and note the
+scan regex must cover **`AQ.`** (Gemini), **`gsk_`** (Groq) and `AIza` prefixes;
+a scan that only covered two of those leaked a key into a transcript once.
 
-### ⚠️ LLM provider status (changed in M2.5 — read all of this)
+### ⚠️ LLM provider status — read all of this
 
-- **Current (M3): Groq**, `LLM_PROVIDER=openai_compatible`,
+- **ACTIVE (dev): Groq.** `LLM_PROVIDER=openai_compatible`,
   `LLM_BASE_URL=https://api.groq.com/openai/v1`, `LLM_MODEL=openai/gpt-oss-120b`.
-  **Free tier ~1000 requests/day**, which is what makes M3's live behavioral
+  **Free tier ~1000 requests/day**, which is what makes M3's live behavioural
   tests (T021/T029) and the T046 eval run affordable.
 - **Verified end-to-end at M3 start** through the real agent path
-  (`build_interview_agent` → `save_interview_state`), 2-turn tool-using
-  conversation, correct overwrite-not-append semantics. This is the **first**
-  time the `openai_compatible` path has worked — earlier versions of this file
-  correctly recorded it as unverified after NVIDIA NIM failed.
+  (`build_interview_agent` → `save_interview_state`): 2-turn tool-using
+  conversation survives, overwrite-not-append semantics correct. This is the
+  **first** time the `openai_compatible` path has ever worked — it was
+  correctly recorded as unverified after NVIDIA NIM failed.
 - **⚠️ Groq rate-limits on TOKENS PER MINUTE**, not just requests
-  (`x-ratelimit-limit-tokens: 8000` for `gpt-oss-120b`), and the reservation
-  counts prompt + `max_tokens`. DeepAgents binds 10 tool schemas into every
-  request, so at `max_tokens=4096` one turn eats most of a minute's budget and
-  the next 429s into backoff. **Measured: 4096 → 39s/68s per turn; 1024 →
-  2.2s/1.7s.** Hence `DEFAULT_MAX_TOKENS_BY_PROVIDER` in `agent/llm.py`.
-  M3 makes this worse (listing text inflates prompts) — keep the model's
-  candidate slate short.
+  (`x-ratelimit-limit-tokens: 8000` for `gpt-oss-120b`, 12000 for
+  `llama-3.3-70b-versatile`), and the reservation counts prompt + `max_tokens`.
+  **Measured: `max_tokens=4096` → 39s and 68s per turn; `1024` → 2.2s and 1.7s.**
+  Hence `DEFAULT_MAX_TOKENS_BY_PROVIDER` in `agent/llm.py`. A 2-turn interview
+  session burns ~9,200 prompt tokens against that 8k/min ceiling, so throttling
+  is normal under load — **suspect TPM before suspecting a hang.**
+- **Model quality note**: `llama-3.3-70b-versatile` showed weaker prompt
+  adherence (re-asked for a slot it already had). `gpt-oss-120b` behaved
+  correctly. Relevant to T029 — an injection result is only evidence for the
+  model it ran on.
 - **Gemini is reserved for demo rehearsal / final verification.**
   `LLM_PROVIDER=google`, default `gemini-3.6-flash`, native
-  `langchain-google-genai` client. **Free tier is ~20 requests/day/model** —
-  a smoke test, not a demo. Each model has its own quota, so switching
-  `LLM_MODEL` buys headroom. The key is preserved in a comment block in
-  `agent-backend/.env` for a one-line switch back.
+  `langchain-google-genai`. **Free tier ~20 requests/day/model.** The key is
+  preserved in a comment block in `.env` for a one-line switch back.
 - **`gemini-2.5-*` is unusable** — rejected for newly-created keys with
   "no longer available to new users". Don't retry it.
 - **Do NOT switch Gemini to its OpenAI-compat endpoint.** Gemini 3.x are
   thinking models; their function calls carry a `thought_signature` that
   must be echoed back. The compat layer drops it, so the **second** turn of
   every tool-using conversation dies with `400 INVALID_ARGUMENT`. Verified
-  directly; `reasoning_effort` does **not** fix it. Every phase of this
-  agent is tool-driven, so the compat path is unusable for Gemini.
-- **OpenRouter is exhausted** — free tier, ~$0 left. A 20-token probe
-  succeeds; the app's configured calls return `402`. No longer wired.
-- **NVIDIA NIM was tried as a fallback and did not work here** — `/models`
-  responds fine, but non-streaming `/chat/completions` returned nothing in
-  120 s, and large tool-laden requests hung even when streaming. The
-  `openai_compatible` provider path exists and is wired but is
-  **unverified end-to-end**.
+  directly; `reasoning_effort` does **not** fix it.
+- **OpenRouter is exhausted** (free tier, ~$0 left). **NVIDIA NIM did not
+  work here** (non-streaming `/chat/completions` returned nothing in 120s).
+
+🔴 **All three API keys (Gemini, Groq, NVIDIA NIM) have been pasted into chat
+transcripts and should be rotated after the demo.** None was ever committed.
 
 ---
 
@@ -249,31 +288,33 @@ cd /home/abbas/ai-car-matchmaker
 docker compose up --build
 #   frontend        http://localhost:3000
 #   agent-backend   http://localhost:8000/health
-#   mcp-services    http://localhost:8100
+#   mcp-services    http://localhost:8100/health   <- real MCP server now
 #   phoenix         http://localhost:16006
 
-# Tests (run the FULL suite together, never file-by-file — see §8.11)
+# Tests (run the FULL suite together, never file-by-file — see §8.20)
 source .venv/bin/activate
-(cd mcp-services  && python -m pytest tests/ -q)
-(cd agent-backend && python -m pytest tests/ -q)
-#   6 tests auto-skip without LLM_API_KEY / running Phoenix — correct behavior
+(cd mcp-services  && python -m pytest tests/ -q)   # 35 pass, no setup needed
+(cd agent-backend && python -m pytest tests/ -q)   # 42 pass, 3 skip
 
-# With live LLM (costs quota — see §5) and Phoenix:
+# With live LLM (see §5) and Phoenix:
+docker compose up -d phoenix
 set -a && . agent-backend/.env && set +a
 (cd agent-backend && python -m pytest tests/ -q)   # 45 pass, 0 skip
 
-# Regenerate mock dataset (deterministic — output is byte-identical each run)
+# Regenerate mock dataset (deterministic — byte-identical each run;
+# a test asserts the committed file equals generate())
 python mcp-services/data/generate_listings.py
 
-# Dev servers (preferred over docker for iteration; .claude/launch.json is configured)
-#   use the Browser pane's preview_start with {name: "agent-backend"} / {name: "frontend"}
+# Dev servers — use the Browser pane's preview_start with
+# {name: "agent-backend"} / {name: "frontend"}, NOT bash.
 ```
 
 **Always `docker compose down` when finished** — don't leave containers running.
 
-**Health endpoint tells you the config state**:
-`{"status":"ok","llm_configured":true,"tracing_enabled":true}` — `degraded`
-means no LLM key; `tracing_enabled:false` means Phoenix registration failed.
+**Health endpoints tell you the config state**:
+- `agent-backend`: `{"status":"ok","llm_configured":true,"tracing_enabled":true}`
+  — `degraded` means no LLM key; `tracing_enabled:false` means Phoenix failed.
+- `mcp-services`: `{"status":"ok","servers":["marketplace"],"listings":203}`
 
 ---
 
@@ -284,36 +325,40 @@ means no LLM key; `tracing_enabled:false` means Phoenix registration failed.
 |---|---|
 | `.specify/memory/constitution.md` | **5 non-negotiable principles** (see §9) |
 | `specs/001-ai-car-matchmaker/spec.md` | US1–US5, edge cases, FR-001…FR-012, key entities, SC-001…SC-006, assumptions |
-| `specs/001-ai-car-matchmaker/plan.md` | Architecture, tech context, Constitution gate check (**with the M2.5 correction recorded**), project structure |
-| `specs/001-ai-car-matchmaker/tasks.md` | **T001–T059 across M0–M6**, incl. **Phase 3.5 = M2.5** audit-remediation tasks T051–T059 |
+| `specs/001-ai-car-matchmaker/plan.md` | Architecture, tech context, Constitution gate check (**with the M2.5 *and* M3 corrections recorded**) |
+| `specs/001-ai-car-matchmaker/tasks.md` | **T001–T059 across M0–M6**; Phase 3.5 = M2.5; **Phase 4 = M3, T020/T023 now checked with findings recorded** |
 
 ### agent-backend (Python)
 | File | Purpose |
 |---|---|
-| `agent/state.py` | `Phase` (6), `InterviewState`, `SessionState`, `RankedRecommendation`, `Booking`, `PaymentConfirmation`. **`TOOLS_BY_PHASE` + `tool_names_for_phase()` are the phase gate**; `SessionState.available_tools()` delegates to them. `save_interview_slots()` **overwrites, never appends** |
-| `agent/graph.py` | (a) M1's minimal `build_graph()`/`compiled_graph()` persistence scaffold — **keep as-is**, `test_graph_persistence.py` depends on its exact shape. (b) `TOOL_REGISTRY` (name→tool), `tools_for_phase()`, `build_agent_for_phase()`, **`PhaseAgentRegistry`** (one cached agent per phase — this is what makes Principle II real), `build_interview_agent()` convenience wrapper, `CarMatchmakerState(DeepAgentState)` carrying `session: dict` |
-| `agent/tools.py` | `save_interview_state` — a `@tool` returning a LangGraph `Command` to update state |
-| `agent/prompts.py` | `PHASE_SYSTEM_PROMPTS` — one prompt per phase (a missing entry fails at startup). Listing-facing phases embed `UNTRUSTED_DATA_RULE` (**Principle IV**) |
-| `agent/llm.py` | `build_model()` selects by `LLM_PROVIDER`: `google` → `ChatGoogleGenerativeAI` (default `gemini-3.6-flash`); `openai_compatible` → `ChatOpenAI` + `LLM_BASE_URL`. `is_configured()`, `LLMNotConfiguredError`. `DEFAULT_MAX_TOKENS=4096` (thinking models burn budget before emitting tool calls) |
-| `agent/render_a2ui.py` | `build_interview_surface_init()` / `_update()`, `_display()` (formats enums/floats without substituting values). **A2UI v0.9**, catalog `https://a2ui.org/specification/v0_9/catalogs/basic/catalog.json` |
-| `api/main.py` | FastAPI. `GET /health` (reports degraded), `WS /ws/{session_id}`. Owns SqliteSaver lifespan, registers observability, selects agent by phase, runs `agent.invoke` via `asyncio.to_thread`, normalizes content via **`message_text()`** |
+| `agent/state.py` | `Phase` (6), `InterviewState`, `SessionState`, `RankedRecommendation`, `Booking`, `PaymentConfirmation`. **`TOOLS_BY_PHASE` + `tool_names_for_phase()` are the phase gate**. `save_interview_slots()` **overwrites, never appends** |
+| `agent/graph.py` | (a) M1's minimal `build_graph()`/`compiled_graph()` persistence scaffold — **keep as-is**. (b) `TOOL_REGISTRY` (name→tool), `tools_for_phase()`, `build_agent_for_phase()`, **`PhaseAgentRegistry`**, `CarMatchmakerState(DeepAgentState)` carrying `session: dict`. **Phase C registers the MCP tools here** |
+| `agent/tools.py` | `save_interview_state` — a `@tool` returning a LangGraph `Command` |
+| `agent/prompts.py` | `PHASE_SYSTEM_PROMPTS` (a missing entry fails at startup). Listing-facing phases embed `UNTRUSTED_DATA_RULE` |
+| `agent/llm.py` | `build_model()` selects by `LLM_PROVIDER`. **`DEFAULT_MAX_TOKENS_BY_PROVIDER`** (google 4096 / openai_compatible 1024) + `LLM_MAX_TOKENS` override |
+| `agent/render_a2ui.py` | `build_interview_surface_init()`/`_update()`, `_display()`. **A2UI v0.9**. **Phase D adds catalogue + reasoning surfaces here** |
+| `api/main.py` | FastAPI. `GET /health`, `WS /ws/{session_id}`. **AsyncSqliteSaver lifespan, `agent.ainvoke`, `aget_state`**, `message_text()` |
 | `observability/otel_setup.py` | `setup_observability()` → `phoenix.otel.register(..., protocol="grpc", auto_instrument=True)` |
-| `.env` / `.env.example` | Secrets / committed template |
-| `tests/` | **11 modules**: `test_state`, `test_tools`, `test_graph_persistence`, `test_render_a2ui`, `test_chat_endpoint`, `test_chat_endpoint_error_handling`, `test_interview_agent`, `test_otel_setup`, **`test_phase_gate`**, **`test_observability_wiring`**, **`test_message_text`** |
+| `tests/` | **11 modules, 45 tests**: `test_state`(6), `test_tools`(5), `test_graph_persistence`(2), `test_render_a2ui`(8), `test_chat_endpoint`(3), `test_chat_endpoint_error_handling`(1), `test_interview_agent`(1), `test_otel_setup`(1), `test_phase_gate`(10), `test_observability_wiring`(2), `test_message_text`(6) |
 
-### mcp-services (Python)
+### mcp-services (Python) — **rewritten in M3 Phase B**
 | File | Purpose |
 |---|---|
-| `data/generate_listings.py` | Deterministic generator, `SEED=20260807`. 10 categories × 20 brands = 200 + **3 adversarial prompt-injection probes** (`ADV-0001..0003`) = **203 listings** |
-| `data/listings.json` | Committed output; a test now asserts it equals `generate()` |
-| `tests/test_generate_listings.py` | **8 tests** incl. the SC-006 compliance check and the committed-file guard |
-| `app_stub.py` | Still the M0 health stub — **replace in M3 (T023)** with the real MCP servers |
-| `marketplace/`, `booking/`, `payment/` | Empty dirs on disk (git doesn't track empty dirs) |
+| `data/generate_listings.py` | Deterministic generator, `SEED=20260807`. 10 categories × 20 brands = 200 + **3 adversarial probes** (`ADV-0001..0003`) = **203**. Price now derives from age + mileage (§3b) |
+| `data/listings.json` | Committed output; a test asserts it equals `generate()` |
+| `marketplace/store.py` | **Query logic**: `load_listings()`, `matches()`, `search()`, `get_details()`, `wrap_untrusted()`. Pure functions over dicts — testable without a transport |
+| `marketplace/server.py` | **FastMCP Streamable HTTP server**: `search_listings`, `get_listing_details`, `/health` custom route. `stateless_http=True`. `app` is the ASGI app |
+| `tests/test_generate_listings.py` | 8 tests incl. SC-006 compliance + committed-file guard |
+| `tests/test_marketplace.py` | **18 tests** — T020 hard filters |
+| `tests/test_marketplace_server.py` | **9 tests** — MCP tool contract (structured_content shape, untrusted wrapper, error path) |
+| `booking/`, `payment/` | Empty dirs (M4) |
+| `app_stub.py` | **DELETED** in Phase B |
 
 ### frontend (React + Vite + TypeScript)
 `src/App.tsx` (chat + A2UI surface), `src/main.tsx`, `index.html`,
 `package.json` (**`@a2ui/react` + `@a2ui/web_core` v0.10.2**, React 19,
 Vite 8), multi-stage `Dockerfile` (**`npm ci` with the lockfile** → nginx).
+`src/{chat,a2ui,mcp-app-host}/` exist but are **empty**.
 
 ---
 
@@ -321,96 +366,122 @@ Vite 8), multi-stage `Dockerfile` (**`npm ci` with the lockfile** → nginx).
 
 Every one is verified, not assumed.
 
-### LLM provider (M2.5)
-1. **Gemini 3.x + OpenAI-compat = broken tool calling.** `thought_signature`
-   is dropped; turn 2 of any tool conversation 400s. Use the native client.
-   See §5.
-2. **Gemini returns `AIMessage.content` as a *list of content blocks***, not
-   a string. `api/main.py`'s `message_text()` flattens it at the wire
-   boundary and drops thinking/reasoning blocks. Any new place that reads
+### MCP + langchain-mcp-adapters (M3 — the load-bearing ones)
+1. **Adapted MCP tools are async-only.** `convert_mcp_tool_to_langchain_tool`
+   returns `StructuredTool(coroutine=..., func=None)`. `tool.invoke()` raises
+   `NotImplementedError: StructuredTool does not support sync invocation`
+   — **including inside an `asyncio.to_thread` worker**. This is why
+   `api/main.py` is `ainvoke`-based.
+2. **`SqliteSaver` cannot do async.** `aget_tuple`/`aput`/`alist` all raise
+   `NotImplementedError`. Runtime uses **`AsyncSqliteSaver`** (`...sqlite.aio`,
+   needs `aiosqlite`, already installed). Its `from_conn_string` is an **async**
+   context manager, and its *sync* methods refuse same-thread calls — so
+   `get_state` must be `aget_state`.
+   `test_graph_persistence.py` keeps the **sync** saver deliberately.
+3. **`AsyncSqliteSaver` runs WAL mode** → writes `.sqlite-wal` / `.sqlite-shm`
+   sidecars. `*.sqlite` does **not** match them; `.gitignore` now covers both.
+4. **Version pin**: `langchain-mcp-adapters 0.3.2` requires `mcp<2.0.0`, and
+   `mcp 2.0.0` exists on PyPI. Both requirements files pin `mcp>=1.24,<2`.
+   An unpinned install silently splits the protocol across a major version.
+5. **The grounding channel (Principle I)**: tools are
+   `response_format="content_and_artifact"`.
+   `ToolMessage.content` = list of text blocks with **stringified** JSON.
+   `ToolMessage.artifact["structured_content"]` = **real typed dicts**.
+   **The renderer must read the artifact**, never the content blocks, never
+   the model's prose.
+6. **FastMCP's `structured_content` shape depends on the return type** — a
+   `dict` return lands at the top level, a `list` return under a `"result"`
+   key. Both our tools therefore return a **named object**
+   (`{listings, count, query}` and `{listing}`). Got this wrong once.
+7. A **fresh MCP session is opened per tool call** (documented adapter
+   behaviour), ~28 ms locally. Fine at demo scale.
+
+### LLM provider
+8. **Gemini 3.x + OpenAI-compat = broken tool calling** (`thought_signature`
+   dropped; turn 2 400s). Use the native client. See §5.
+9. **Gemini returns `AIMessage.content` as a *list of content blocks***.
+   `message_text()` flattens it at the wire boundary. Any new place that reads
    `.content` must go through it.
-3. **`(str, Enum)` members stringify as `TransactionType.BUY`**, not `buy` —
-   `Enum` overrides `__str__`. Use `.value` for anything user-facing.
-   `render_a2ui._display()` handles this plus whole-dollar floats.
+10. **Groq throttles on tokens/minute** — see §5. Symptom is a 20–70s "hang"
+    that is actually retry backoff, not a dead call.
 
 ### DeepAgents / LangGraph
-4. **`create_deep_agent` always installs `FilesystemMiddleware`**, binding 9
-   built-in tools (`ls`, `read_file`, `write_file`, `edit_file`, `delete`,
-   `glob`, `grep`, `execute`, `task`) in **every** phase, outside our gate.
-   **Not removable** via its public API (`middleware=` appends to the base
-   stack, it doesn't replace it). Safe today because the default
-   `StateBackend` is a **virtual filesystem in graph state** — never touches
-   the host — and has **no `execute` method**, so shell execution is inert.
-   `test_phase_gate.py` pins the built-in set and asserts
-   `StateBackend.execute` stays absent. **Re-evaluated at M3** (below).
-4b. **The 9 built-ins cost ~2,726 prompt tokens in *every* request** —
-   roughly 4x our own system prompt (~362) plus `save_interview_state`
-   (~303) combined. Re-checked against `deepagents 0.7.5`: still not
-   removable. `create_deep_agent` does expose an undocumented-here
-   `permissions=[FilesystemPermission(...)]` parameter, but it is a
-   **runtime deny** (the tool returns permission-denied), so the schemas —
-   and their tokens — stay bound regardless. Dropping `create_deep_agent`
-   for langchain's plain `create_agent` would remove them, but hackathon
-   hard requirement #9 mandates the DeepAgents harness, so that trade is
-   not available. Consequence: this is a fixed ~2.7k/request tax that
-   interacts badly with Groq's 8k tokens/minute ceiling (§5).
-   **Still worth doing in M3**: pass deny-all `permissions` for the
-   Principle IV story even though it saves no tokens.
-5. **A DeepAgents agent's tools are fixed at construction.** That's why the
-   phase gate is one agent *per phase* (`PhaseAgentRegistry`) rather than
-   filtering at call time.
-6. `InjectedState` **only resolves inside a real compiled graph**. Unit tests
-   must call the tool via `save_interview_state.func(...)` directly.
-7. `SqliteSaver.from_conn_string()` is a **context manager**, use `with`.
-8. Graph state must be **plain-JSON-able** — `SessionState` is stored as
-   `.model_dump(mode="json")` under `session`, rehydrated in app code.
-9. **Do not "clean up" M1's `build_graph`/`_touch` scaffold.** A fast
-   LLM-free graph is the right tool for testing persistence in isolation.
-10. Compiled-agent tool introspection:
-    `agent.nodes["tools"].bound.tools_by_name` (note: **not** `_tools_by_name`).
+11. **`create_deep_agent` always installs `FilesystemMiddleware`**, binding 9
+    built-in tools (`ls`, `read_file`, `write_file`, `edit_file`, `delete`,
+    `glob`, `grep`, `execute`, `task`) in **every** phase, outside our gate.
+    Safe because the default `StateBackend` is a **virtual filesystem in graph
+    state** with **no `execute` method**. `test_phase_gate.py` pins both.
+12. **Those built-ins cost ~2,726 prompt tokens in every request** — ~4× our
+    own system prompt (~362) plus `save_interview_state` (~303) combined.
+    Re-checked against `deepagents 0.7.5`: **still not removable**.
+    `create_deep_agent` exposes `permissions=[FilesystemPermission(...)]`, but
+    that is a **runtime deny** — schemas and their tokens stay bound. Dropping
+    `create_deep_agent` for langchain's plain `create_agent` would remove them,
+    but **hard requirement #9 mandates the DeepAgents harness**, so that trade
+    is unavailable. Fixed ~2.7k/request tax; interacts badly with Groq's TPM
+    ceiling. *Still worth passing deny-all `permissions` for Principle IV.*
+13. **A DeepAgents agent's tools are fixed at construction** — hence one agent
+    per phase (`PhaseAgentRegistry`).
+14. `InjectedState` **only resolves inside a real compiled graph**. Unit tests
+    must call the tool via `save_interview_state.func(...)`.
+15. Graph state must be **plain-JSON-able** — `SessionState` is stored as
+    `.model_dump(mode="json")` under `session`.
+16. **Do not "clean up" M1's `build_graph`/`_touch` scaffold.**
+17. Compiled-agent tool introspection:
+    `agent.nodes["tools"].bound.tools_by_name` (**not** `_tools_by_name`).
 
 ### A2UI
-11. **Use protocol v0.9, not v1.0.** `@a2ui/react` v0.10.2 ships v0_8/v0_9
-    builds only — there is no v1_0 export. v0.9's shapes are compatible.
-12. **`@a2ui/react@0.10.2`'s `"./styles/structural.css"` export is broken** —
+18. **Use protocol v0.9, not v1.0.** `@a2ui/react` v0.10.2 exports only
+    `.`, `./v0_8`, `./v0_9` — no v1_0. (`@a2ui/web_core` ships v1_0 *schemas*
+    under `src/` but does not export them.) Re-verified at M3 start.
+19. **v0.9 basic catalog components** (all that Phase D may use): `Text`,
+    `Image`, `Icon`, `Video`, `AudioPlayer`, `Row`, `Column`, `List`, `Card`,
+    `Tabs`, `Modal`, `Divider`, `Button`, `TextField`, `CheckBox`,
+    `ChoicePicker`, `Slider`, `DateTimeInput`.
+20. **Listing selection (Phase E)**: `new MessageProcessor(catalogs,
+    actionHandler, options)` — the **2nd constructor arg is a global
+    `ActionListener`** `(action: A2uiClientAction) => void`. That is how a
+    card `Button`'s `action` gets back to us. The WS handler currently accepts
+    only `{"type":"chat"}` — a new inbound message type is needed.
+21. **`@a2ui/react@0.10.2`'s `"./styles/structural.css"` export is broken** —
     points at a file not in the published package. Import dropped; components
     render unstyled but functional. Styling is an open item (§11).
-13. `@a2ui/react` **does exist on npm** — the original "hand-roll a Lit embed"
-    assumption was wrong, in our favor.
+22. The frontend already renders **all** surfaces in `processor.model.surfacesMap`,
+    so extra surfaces appear automatically — Phase E is layout, not plumbing.
+23. `(str, Enum)` members stringify as `TransactionType.BUY`. Use `.value`.
+    `render_a2ui._display()` handles this plus whole-dollar floats.
 
 ### Phoenix
-14. **Reading spans back**: `GET /v1/spans?project_name=…` **does not work**
+24. **Reading spans back**: `GET /v1/spans?project_name=…` **does not work**
     (needs a POST body → 422). Working path: `GET /v1/projects` → find by
-    name → `GET /v1/projects/{id}/spans`.
-15. Phoenix takes **~15–20 s** to become HTTP-ready. Poll, don't sleep.
-16. Ingestion is async even after `force_flush()` — poll with a deadline.
-17. `setup_observability()` must run **before** any agent is constructed —
-    `auto_instrument` patches LangChain globally.
-18. Tracing must be **fail-soft**: an unreachable collector must not take the
-    app down. It's an observability aid, not a request-path dependency.
+    name (`ai-car-matchmaker-agent-backend`) → `GET /v1/projects/{id}/spans`.
+25. Phoenix takes **~15–20 s** to become HTTP-ready. Poll, don't sleep.
+26. Ingestion is async even after `force_flush()` — poll with a deadline.
+27. `setup_observability()` must run **before** any agent is constructed.
+28. Tracing must be **fail-soft**.
+29. Span token counts are readable at `llm.token_count.prompt` — useful for
+    diagnosing the TPM throttle (finding 10).
 
 ### pytest
-19. **Never** set env vars at module level (`os.environ.setdefault(...)`) in a
-    test file. It executes at **collection time** and leaks into *other*
-    modules' `skipif` evaluations — this really happened. Use function-scoped
-    `monkeypatch.setenv`.
-20. **Run the full suite together**, not file-by-file — the leak above was
-    invisible in isolation.
-21. Credential gates check key **presence**, so an out-of-quota key produces
-    **failures, not skips**. Check the account before debugging code.
+30. **Never** set env vars at module level in a test file — executes at
+    collection time and leaks into *other* modules' `skipif` evaluation.
+    Use function-scoped `monkeypatch.setenv`.
+31. **Run the full suite together**, not file-by-file.
+32. Credential gates check key **presence**, so an out-of-quota key produces
+    **failures, not skips**.
 
 ### Tooling / environment
-22. `.gitignore`'s `.env.*` pattern wrongly excluded **`.env.example`**. Fixed
-    with an explicit negation — don't reintroduce.
-23. `.gitignore` also once wrongly excluded **`.specify/.gitignore`**.
-24. The Browser tool's **coordinate-based clicks/typing don't reliably trigger
-    React's controlled-input handlers.** Workaround: set the input via the
-    **native value setter + `dispatchEvent`**, click via `.click()`. Tooling
-    quirk, **not an app bug**.
-25. No `sudo`, no `gh` — use `curl` + the token from `~/.git-credentials`.
-26. **Concurrent heavy background jobs cause spurious failures** — a
-    `docker compose build` running alongside a big `pip install` failed
-    `npm ci` once, then passed cleanly on its own. Re-run before debugging.
+33. `.gitignore`'s `.env.*` pattern wrongly excluded `.env.example` — fixed
+    with an explicit negation. Don't reintroduce.
+34. The Browser tool's **coordinate-based clicks/typing don't reliably trigger
+    React's controlled-input handlers.** Workaround: native value setter +
+    `dispatchEvent`, click via `.click()`. Tooling quirk, not an app bug.
+35. No `sudo`, no `gh` — use `curl` + the token from `~/.git-credentials`.
+36. **Concurrent heavy background jobs cause spurious failures** — re-run
+    before debugging.
+37. **The Bash tool's cwd persists between calls.** A `cd` in one call affects
+    the next. This produced a false "file doesn't exist" conclusion once — use
+    absolute paths, or re-`cd` explicitly.
 
 ---
 
@@ -419,94 +490,103 @@ Every one is verified, not assumed.
 Full text in `.specify/memory/constitution.md`.
 
 1. **Grounded Recommendations (NON-NEGOTIABLE)** — every price/spec/availability
-   shown must be traceable verbatim to a tool-call result. The LLM never retypes
-   numeric listing data; `render_a2ui.py` reads structured output directly and
-   may *format* but never substitute.
+   shown must be traceable verbatim to a tool-call result.
+   *Status: **PARTIAL**. The mechanism exists; no listing value has reached the
+   UI yet. T022/T026 (Phase D) is where this becomes real. The channel is
+   `ToolMessage.artifact["structured_content"]` (finding 5).*
 2. **Explicit Phase Gating** — a *code-enforced* state machine. `TOOLS_BY_PHASE`
    is the single gate definition; `PhaseAgentRegistry` builds one agent per
-   phase from it. Transactional tools are unreachable out of phase because
-   they are never bound. *(Genuinely enforced since M2.5 — see §3.)*
+   phase from it. *Genuinely enforced since M2.5.*
 3. **Mock-Only Transactions** — no real payment path, no BMW APIs, no
-   persistence of card-like data in DB/logs/traces. Synthetic confirmation IDs only.
-4. **Untrusted Data Boundary** — marketplace listing text and MCP-App form input
-   are **data, never instructions**. `UNTRUSTED_DATA_RULE` is already embedded
-   in every listing-facing phase prompt and asserted by `test_phase_gate.py`.
-   **The behavioral proof is still owed**: T029 must show the three `ADV-*`
-   probes cause zero deviation.
-5. **Full Observability** — every LLM call, tool call, and phase transition emits
-   an OTel span. Process-level registration, not opt-in per call site.
-   *(Genuinely wired since M2.5 — see §3.)*
+   persistence of card-like data. *Nothing to enforce until M4b.*
+4. **Untrusted Data Boundary** — marketplace listing text is **data, never
+   instructions**. *The prompt rule has existed since M2; the **wrapping** only
+   became real in M3 Phase B (`store.wrap_untrusted`, applied server-side).
+   Behavioral proof is still owed: **T029** must show the three `ADV-*` probes
+   cause zero deviation.*
+5. **Full Observability** — every LLM call, tool call, and phase transition
+   emits an OTel span. *Genuinely wired since M2.5; re-verified after the async
+   migration (16 spans for one 2-turn session).*
 
 ---
 
-## 10. NEXT UP: M3 — Research & Ranked Recommendations (User Story 2)
+## 10. NEXT UP: M3 Phase C — start here
 
-Tasks **T020–T029** in `tasks.md` (Phase 4).
+### Immediate next task: T024 + T025
 
-| Task | Work |
-|---|---|
-| T023 | `mcp-services/marketplace/`: real MCP server (Python SDK) exposing `search_listings`, `get_listing_details` over **Streamable HTTP**; replace `mcp-services/app_stub.py`. Add `mcp` to `mcp-services/requirements.txt` |
-| T024 | Wire `langchain-mcp-adapters` into agent-backend. **⚠️ API still unverified — check it against the installed version before writing code.** Add to `agent-backend/requirements.txt` |
-| T025 | `agent/graph.py`: RESEARCHING phase behavior (search → rank → reasoning), transition to RESULTS_READY. **Register the new tools in `TOOL_REGISTRY`** — the gate already names them |
-| T026 | `agent/render_a2ui.py`: **two new A2UI surfaces** — reasoning-steps (live during search) *and* catalogue. Both fed from structured tool output only (Principle I) |
-| T027 | `mcp-apps-ui/listing-detail/`: the marketplace MCP App iframe (single-listing deep-dive) |
-| T028 | Frontend: render both surfaces; wire listing selection back to the agent |
-| T020 | Unit tests: hard filters (category, budget, transaction_type, availability) |
-| T021 | Integration test: zero-match → agent **relaxes a constraint and says so**, never fabricates |
-| T022 | Snapshot test: A2UI catalogue values **exactly equal** tool-call record values (Principle I / SC-002) |
-| T029 | **Security test**: the 3 `ADV-*` seeded listings must cause **zero** behavioral deviation (Principle IV) |
+**T024 — wire `langchain-mcp-adapters` into agent-backend.**
+The API is **already verified** (§8.1–8.7) — do not re-research it.
+```python
+from langchain_mcp_adapters.client import MultiServerMCPClient
+client = MultiServerMCPClient({"marketplace": {
+    "transport": "streamable_http",
+    "url": os.environ.get("MCP_MARKETPLACE_URL", "http://localhost:8100/mcp"),
+}})
+tools = await client.get_tools()      # async!
+```
+- Add `langchain-mcp-adapters>=0.3.2,<0.4` **and** `mcp>=1.24,<2` to
+  `agent-backend/requirements.txt` (currently only a TODO comment).
+  It is already installed in `.venv`.
+- `MCP_MARKETPLACE_URL` is already passed by `docker-compose.yml`.
+- Tool discovery is async and happens at startup → fetch once in the FastAPI
+  lifespan and inject into `TOOL_REGISTRY` **before** `PhaseAgentRegistry` is
+  constructed (agents fix their tools at construction, finding 13).
+- Must be **fail-soft** like tracing: mcp-services down should degrade
+  research, not kill the backend.
 
-### 🔴 OPEN DECISION — the user has not answered this yet
+**T025 — RESEARCHING behaviour.** Two design decisions already taken:
+- **Ranking is deterministic Python, not the LLM.** A `rank()` function builds
+  `RankedRecommendation(listing_id, rank, fit_score, reasoning)` from the
+  artifact's structured fields. spec.md's own entity definition demands this
+  ("never independently authored by the LLM"). It also keeps prompts small,
+  which matters against Groq's TPM ceiling.
+- **Research must auto-kick-off.** Today the phase flips to RESEARCHING inside
+  the interview turn, but nothing runs until the user sends another message —
+  which contradicts spec.md US1 AS3 ("no further user prompt required to
+  proceed"). Run research in the same turn the interview completes.
+- Register the MCP tools in `TOOL_REGISTRY`; the gate already **names**
+  `search_listings`/`get_listing_details` for `Phase.RESEARCHING`, so
+  `test_phase_gate.py` starts covering them automatically.
+- Consider passing deny-all `permissions=` to `create_deep_agent` (finding 12).
 
-**M3's behavioral tests (T021, T029) need many live LLM calls, and the Gemini
-free tier allows ~20/day/model.** T029 is the one that actually proves
-Principle IV. Options put to the user (they deferred answering):
+### Then
 
-1. **Build M3 now, defer the live tests** — implement everything with
-   deterministic non-LLM tests; write T021/T029 to auto-skip until a billed
-   key exists. Fastest to a demoable MVP; security proof lands later.
-2. **User provides a billed key first** — build M3 with T021/T029 exercised
-   live throughout. Slower to start, Principle IV proven properly.
-3. **Scripted fake model for the behavioral tests** — deterministic, zero API
-   calls, plus a thin live smoke test. Proves plumbing and our prompt
-   construction, but not real model behavior.
+| Phase | Task | Work |
+|---|---|---|
+| D | T026 | `render_a2ui.py`: reasoning-steps surface (`List` of steps, emitted during search) + catalogue surface (`Column` of `Card` → `Text`/`Image`/`Button`). Fed from the artifact only |
+| D | T022 | Snapshot test: A2UI catalogue values **exactly equal** artifact values (Principle I / SC-002) |
+| E | T028 | Frontend: layout the two new surfaces; `MessageProcessor` action handler + new `{"type":"action"}` WS message (finding 20) |
+| F | T029 | **Security test**: the 3 `ADV-*` listings cause **zero** behavioural deviation (Principle IV) |
+| F | T021 | Integration test: zero-match → agent **relaxes a constraint and says so** |
+| — | T027 | `mcp-apps-ui/listing-detail/` — **recommended deferred past M4a/M4b**, it is the explicitly *additive secondary* surface while M4 is a hard requirement |
 
-**Ask the user which before starting M3.**
+### Quota strategy (decided)
 
-### Layout note
-
-`mcp-apps-ui/{listing-detail,booking-form,checkout}`,
-`frontend/src/{chat,a2ui,mcp-app-host}` and
-`mcp-services/{marketplace,booking,payment}` **all exist on disk but are
-empty**, so git doesn't track them and a fresh clone won't have them —
-create as needed. (An earlier version of this file said `mcp-apps-ui/` and
-the `frontend/src` subfolders didn't exist; they do.) M2's frontend went
-into `frontend/src/App.tsx` directly. plan.md's tree is the intended
-target, not current reality.
+Development runs on **Groq** (~1000 req/day), so Phases C–E cost **zero**
+LLM requests and T021/T029 can be exercised live. Recommended shape for both:
+an **always-on deterministic half** (so CI never depends on a key) plus a
+**live-gated half** that is the recorded proof. Gemini's ~20/day is reserved
+for demo rehearsal. Run T029 on Groq *and* once on whatever model ships,
+since an injection result is only evidence for the model it ran on.
 
 ---
 
 ## 11. Open items / known gaps
 
-- **🔴 LLM quota** — Gemini free tier ~20 req/day/model. **A billed key is
-  required** for the demo, for M3's T021/T029, and for the T046 eval run.
-- **Evals (bonus #15) still owed** — observability is real now, evals are not.
+- **Evals (bonus #15) still owed** — T046.
 - **Slide deck template** — organizers haven't provided it. T049 blocked.
-- **Demo video** — T050. Recording is the user's to do; the agent can script it.
-- **A2UI styling** — components render unstyled (§8.12). Needs styling for polish.
-- **`langchain-mcp-adapters` API unverified** — check at M3 start.
-- **`docker-compose.yml` has no `healthcheck:` blocks** — `depends_on` only
-  waits for container start, not readiness. Harmless today; worth adding.
-- **`Phase.RESEARCHING` is selected but powerless.** `api/main.py` *does*
-  switch agents on the persisted phase (`agents.for_phase(...)`), so the next
-  turn genuinely uses the RESEARCHING agent — an earlier version of this file
-  wrongly said the interview agent keeps running. The real problems are that
-  (a) that agent binds **zero** domain tools until `TOOL_REGISTRY` gains them,
-  and (b) nothing *triggers* research without another user message, which
-  contradicts spec.md US1 AS3 ("no further user prompt required to proceed").
-  Both are M3/T025's job.
-- **API keys were pasted into a chat transcript** (Gemini + an NVIDIA NIM key).
-  Never committed. **Recommend rotating both after the hackathon.**
+- **Demo video** — T050. Recording is the user's to do.
+- **A2UI styling** — components render unstyled (§8.21). Needs polish.
+- **Groq TPM ceiling** is the main demo risk (§5). Keep the model's candidate
+  slate short; consider `llama-3.3-70b-versatile` (12k TPM) if throttling bites,
+  accepting weaker prompt adherence.
+- **DeepAgents' ~2.7k token/request tax** (§8.12) — unavoidable given req #9.
+- **`frontend/src/{chat,a2ui,mcp-app-host}/` are empty** — M2 put everything in
+  `App.tsx`. Split when M4's host adds real complexity.
+- **`agent-backend/requirements.txt` still lists the MCP deps as a comment** —
+  T024 must promote them to real entries.
+- 🔴 **Rotate all three API keys** (Gemini, Groq, NVIDIA NIM) after the demo —
+  all have been pasted into chat transcripts. None was ever committed.
 
 ---
 
@@ -518,17 +598,16 @@ target, not current reality.
 - **Verify, don't assume.** The user values live end-to-end verification
   (real browser, real Docker build, real span queries) over "tests pass."
   Every audit so far found real bugs this way.
-- **Audit before advancing.** The user asks for a re-check of prior milestones
-  before starting a new one. Bar: **fresh `git clone` into a temp dir + fresh
-  venv + fresh docker build + live stack**.
-- **Be objective**; challenge the docs and the plan where a better approach exists.
-  Distinguish facts / assumptions / recommendations / unknowns. Never fabricate.
+- **Audit before advancing.** Bar: fresh `git clone` into a temp dir + fresh
+  venv + fresh docker build + live stack.
+- **Be objective**; challenge the docs and the plan where a better approach
+  exists. Distinguish facts / assumptions / recommendations / unknowns.
 - **Push cadence is pre-authorized**: commit + push after each milestone once
-  its tests pass. No need to ask each time.
+  its tests pass.
 - **Keep `tasks.md` checkboxes truthful as you go.**
 - **Report failures honestly with the actual output.** If a claim in a doc
-  turns out false, say so plainly and record the correction rather than
-  quietly editing it.
+  turns out false, say so plainly and **record the correction rather than
+  quietly editing it** — see §3, which exists because of this rule.
 
 ---
 
@@ -539,25 +618,24 @@ For a new session, read in this order:
 1. **`HANDOFF.md`** ← this file (full context + gotchas)
 2. **`.specify/memory/constitution.md`** — the 5 principles all code must honor
 3. **`specs/001-ai-car-matchmaker/spec.md`** — user stories, FRs, success criteria
-4. **`specs/001-ai-car-matchmaker/tasks.md`** — task state + per-task notes
-   (Phase 3's "Live-verification findings", **Phase 3.5 = M2.5 remediation**,
-   Phase 4 = next work)
+4. **`specs/001-ai-car-matchmaker/tasks.md`** — task state + per-task findings
+   (Phase 3.5 = M2.5; **Phase 4 = M3, current work**)
 5. **`specs/001-ai-car-matchmaker/plan.md`** — architecture + the corrected
-   Constitution Check table
+   Constitution Check table (**both** correction blocks)
 6. **`README.md`** — run instructions
 
-Then, before writing M3 code:
+Then, before writing M3 Phase C code:
 
-7. `agent-backend/agent/state.py` — `TOOLS_BY_PHASE` gate + entity shapes
-8. `agent-backend/agent/graph.py` — `PhaseAgentRegistry` / `TOOL_REGISTRY`;
-   M3 registers its new tools here
-9. `agent-backend/agent/prompts.py` — `UNTRUSTED_DATA_RULE` (Principle IV)
-10. `agent-backend/agent/render_a2ui.py` — the surface pattern to copy for
-    the catalogue/reasoning surfaces
-11. `agent-backend/api/main.py` — the WebSocket contract the frontend depends on
-12. `agent-backend/tests/test_phase_gate.py` — how the gate is proven; M3 must
-    keep it passing
-13. `mcp-services/data/generate_listings.py` — the listing schema M3 will query
+7. `mcp-services/marketplace/store.py` — the query logic and the untrusted-data wrapper
+8. `mcp-services/marketplace/server.py` — the MCP tool contract Phase C consumes
+9. `mcp-services/tests/test_marketplace_server.py` — the exact `structured_content` shape
+10. `agent-backend/agent/state.py` — `TOOLS_BY_PHASE` gate + entity shapes
+11. `agent-backend/agent/graph.py` — `PhaseAgentRegistry`/`TOOL_REGISTRY`; **T024/T025 change this**
+12. `agent-backend/api/main.py` — async lifespan + the WebSocket contract
+13. `agent-backend/agent/llm.py` — provider selection + per-provider token caps
+14. `agent-backend/agent/render_a2ui.py` — the surface pattern Phase D copies
+15. `agent-backend/agent/prompts.py` — `UNTRUSTED_DATA_RULE`
+16. `agent-backend/tests/test_phase_gate.py` — how the gate is proven; M3 must keep it passing
 
 **Suggested opening prompt for the new chat** — copy this verbatim:
 
@@ -565,18 +643,20 @@ Then, before writing M3 code:
 > lists under §13 Required reading.
 >
 > This is the Amulate Summer Hackathon 2026 "AI Car Matchmaker" project.
-> M0, M1, M2 and M2.5 are complete, tested and pushed to `main` (`fc54d31`).
-> M3 (Research & Ranked Recommendations, tasks T020–T029) is next.
+> M0–M2.5 are complete. **M3 (User Story 2) is in progress**: Phase A (async
+> agent path) and Phase B (T020/T023, marketplace MCP server) are done, tested
+> and pushed to `main` (`c6915fd`). **Continue from M3 Phase C (T024 + T025)**,
+> described in HANDOFF §10.
 >
-> Do **not** write any code yet. First:
-> 1. Confirm you have full context, and tell me anything in the docs that
->    looks wrong, stale, or self-contradictory — a previous audit found two
->    Constitution principles marked PASS with no implementation, so treat the
->    docs as claims to verify, not as truth.
-> 2. Verify the `langchain-mcp-adapters` API against the installed version
->    before designing around it (HANDOFF §10 / T024 flags it as unverified).
-> 3. Give me your M3 plan, and answer the open decision in HANDOFF §10 about
->    how to handle T021/T029 given the ~20 requests/day Gemini quota.
+> Do **not** write code immediately. First confirm you have full context and
+> tell me anything in the docs that looks wrong, stale, or self-contradictory —
+> three separate audits have now found docs asserting behaviour the code did
+> not have (HANDOFF §3), so treat the docs as claims to verify.
 >
-> Note: outbound POSTs to LLM providers fail inside the default tool sandbox —
-> live-LLM commands need `dangerouslyDisableSandbox: true`.
+> Notes:
+> - The `langchain-mcp-adapters` API is already verified — HANDOFF §8.1–8.7.
+>   Don't re-research it, but do sanity-check it still holds.
+> - Outbound POSTs to LLM providers fail inside the default tool sandbox;
+>   live-LLM commands need `dangerouslyDisableSandbox: true`.
+> - Dev LLM is Groq (~1000 req/day), so live tests are affordable. It throttles
+>   on tokens/minute — a 20–70s "hang" is backoff, not a dead call.

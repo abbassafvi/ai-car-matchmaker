@@ -154,11 +154,22 @@ class SessionState(BaseModel):
         return self
 
     def available_tools(self) -> list[str]:
-        """Explicit phase gate (Constitution Principle II): the tool names
-        exposed to the model for this session's current phase.
+        """Read-only view of the tool names permitted in this session's phase.
 
-        Delegates to the module-level table so there is exactly one gate
-        definition -- agent/graph.py binds real tool objects from that same
-        table when constructing each phase's agent.
+        ⚠️ **This is NOT the enforcement point, despite what its name and
+        this method's former docstring suggested.** Nothing in production
+        calls it -- verified by grep, twice. The gate is enforced by
+        `agent/graph.py::tools_for_phase()`, which resolves
+        `tool_names_for_phase()` to real tool objects at agent construction;
+        a tool the table does not name is simply never bound.
+
+        Kept because `test_phase_gate.py` uses it to assert that this view
+        and the binding path cannot drift apart, and deliberately
+        re-documented rather than deleted: the M2.5 audit's headline finding
+        was that this exact method had zero production callers while being
+        recorded as the gate, and the remediation built a *different*
+        mechanism rather than wiring this one up. Anyone editing this
+        expecting to change what the model can call would be editing the
+        wrong function.
         """
         return tool_names_for_phase(self.phase)

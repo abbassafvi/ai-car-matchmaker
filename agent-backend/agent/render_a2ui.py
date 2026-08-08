@@ -33,6 +33,13 @@ INTERVIEW_SURFACE_ID = "interview-progress"
 REASONING_SURFACE_ID = "research-reasoning"
 CATALOGUE_SURFACE_ID = "catalogue"
 
+# The action name a catalogue Button dispatches to the client, which the
+# client relays back over the WebSocket as {"type": "action"}. Deliberately
+# the same string as the `select_listing` tool: the button and the model
+# reach the same code path (SessionState.select_listing), so a click and a
+# "I'll take the Jeep" cannot diverge in behaviour.
+SELECT_LISTING_ACTION = "select_listing"
+
 # Icons are inline SVG path data, not catalog icon names.
 #
 # A2UI v0.9's `Icon.name` accepts either a name from a fixed enum or an
@@ -346,6 +353,7 @@ def _catalogue_rows(
     listings: list[dict[str, Any]],
     recommendations: list[RankedRecommendation],
     interview: dict[str, Any],
+    selected_listing_id: str | None = None,
 ) -> list[dict]:
     """One data row per listing, read straight off the verbatim tool record.
 
@@ -384,6 +392,12 @@ def _catalogue_rows(
             "source": _display(listing.get("listing_source") or ""),
             "reasoning": rec.reasoning if rec else "",
             "fit_label": f"Fit {rec.fit_score:.2f}" if rec else "",
+            # Selection state is data, not a separate component tree: A2UI
+            # has no conditional rendering, so the button's label carries the
+            # state and every card keeps the same shape.
+            "select_label": (
+                "✓ Selected" if listing["id"] == selected_listing_id else "Choose this one"
+            ),
         })
 
     return rows
@@ -423,6 +437,7 @@ def _catalogue_components() -> list[dict]:
                 "listing_divider",
                 "listing_why",
                 "listing_source_text",
+                "listing_select",
             ],
         },
         {
@@ -498,6 +513,29 @@ def _catalogue_components() -> list[dict]:
             "text": {"path": "source"},
             "variant": "caption",
         },
+        # `Button` requires BOTH `child` and `action` -- there is no
+        # decorative Button in v0.9. The action's context value is a
+        # DataBinding, and the renderer resolves an action against the
+        # per-row DataContext (verified in web_core's resolveAction), so one
+        # templated button yields the right listing id per card rather than
+        # needing one component per card.
+        {
+            "id": "listing_select",
+            "component": "Button",
+            "child": "listing_select_label",
+            "variant": "primary",
+            "action": {
+                "event": {
+                    "name": SELECT_LISTING_ACTION,
+                    "context": {"listing_id": {"path": "id"}},
+                },
+            },
+        },
+        {
+            "id": "listing_select_label",
+            "component": "Text",
+            "text": {"path": "select_label"},
+        },
     ]
 
 
@@ -505,6 +543,7 @@ def build_catalogue_surface_init(
     listings: list[dict[str, Any]],
     recommendations: list[RankedRecommendation],
     interview: dict[str, Any],
+    selected_listing_id: str | None = None,
 ) -> list[dict]:
     """createSurface + component tree + the ranked slate. Once per connection.
 
@@ -533,7 +572,9 @@ def build_catalogue_surface_init(
             "updateDataModel": {
                 "surfaceId": CATALOGUE_SURFACE_ID,
                 "path": "/",
-                "value": {"listings": _catalogue_rows(listings, recommendations, interview)},
+                "value": {"listings": _catalogue_rows(
+                    listings, recommendations, interview, selected_listing_id
+                )},
             },
         },
     ]
@@ -543,6 +584,7 @@ def build_catalogue_surface_update(
     listings: list[dict[str, Any]],
     recommendations: list[RankedRecommendation],
     interview: dict[str, Any],
+    selected_listing_id: str | None = None,
 ) -> dict:
     """Data-only update when a later search replaces the slate."""
     return {
@@ -550,6 +592,8 @@ def build_catalogue_surface_update(
         "updateDataModel": {
             "surfaceId": CATALOGUE_SURFACE_ID,
             "path": "/listings",
-            "value": _catalogue_rows(listings, recommendations, interview),
+            "value": _catalogue_rows(
+                listings, recommendations, interview, selected_listing_id
+            ),
         },
     }

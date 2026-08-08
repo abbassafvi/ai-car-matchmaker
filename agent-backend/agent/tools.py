@@ -56,3 +56,45 @@ def save_interview_state(
         "session": session.model_dump(mode="json"),
         "messages": [ToolMessage("Interview state saved.", tool_call_id=tool_call_id)],
     })
+
+
+@tool
+def select_listing(
+    listing_id: str,
+    state: Annotated[dict, InjectedState] = None,
+    tool_call_id: Annotated[str, InjectedToolCallId] = None,
+) -> Command:
+    """Record which listing the user has chosen, once they have picked one.
+
+    Pass the exact listing id as shown in the recommendations (e.g.
+    "LST-0035"). Only ids from the current recommendations are accepted --
+    never invent one, and never guess at an id for a car the user described
+    in words without checking it against the list you were given.
+    """
+    session = SessionState.model_validate(state["session"])
+
+    # A rejected selection comes back as an ordinary ToolMessage rather than
+    # an exception, so the model can recover by asking the user which of the
+    # listings it actually showed them they meant. Raising here would abort
+    # the turn and strand the user (and HANDOFF §8.7a notes the agent never
+    # sees exceptions from tools anyway).
+    try:
+        session.select_listing(listing_id)
+    except ValueError as exc:
+        return Command(update={"messages": [
+            ToolMessage(
+                f"Could not select that listing: {exc} Ask the user which of "
+                "the recommended listings they mean.",
+                tool_call_id=tool_call_id,
+            ),
+        ]})
+
+    listing = session.selected_listing() or {}
+    return Command(update={
+        "session": session.model_dump(mode="json"),
+        "messages": [ToolMessage(
+            f"Selected {listing_id} ({listing.get('year')} {listing.get('brand')} "
+            f"{listing.get('model')}). The booking step is next.",
+            tool_call_id=tool_call_id,
+        )],
+    })

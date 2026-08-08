@@ -150,6 +150,24 @@ body,
   text-align: center;
 }
 
+/* Card call-to-action ("Choose this one" / "✓ Selected"). */
+.a2ui-surface .a2ui-card button {
+  margin-top: 10px;
+  padding: 8px 14px;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  color: #ffffff;
+  background: var(--a2ui-color-primary);
+  border: 1px solid var(--a2ui-color-primary);
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.a2ui-surface .a2ui-card button:hover {
+  background: #0a55b0;
+}
+
 .a2ui-surface hr {
   border: 0;
   border-top: 1px solid var(--a2ui-color-line);

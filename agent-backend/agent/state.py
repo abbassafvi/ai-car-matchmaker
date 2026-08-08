@@ -153,6 +153,48 @@ class SessionState(BaseModel):
             self.phase = Phase.RESULTS_READY
         return self
 
+    def select_listing(self, listing_id: str) -> "SessionState":
+        """Record the user's chosen listing and advance to FORM_FILLING.
+
+        The third and last phase transition in the system, deliberately
+        sitting beside `save_interview_slots` and `record_research` so that
+        every transition remains one code path in one module (Principle II)
+        rather than something a model announces it has done.
+
+        **The id must already be in the candidate slate.** That is a
+        Principle I guarantee as much as a Principle II one: the slate is
+        the set of listings that actually came back from a tool call, so
+        refusing anything else means a selection can never be made against a
+        listing id the model invented, or against one from a previous search
+        that is no longer on screen. Raising rather than silently ignoring,
+        because a selection that appears to succeed and does not is the
+        worst of the three outcomes -- M4a's booking form would then open on
+        nothing.
+        """
+        if listing_id not in self.candidate_ids():
+            raise ValueError(
+                f"{listing_id!r} is not in the current candidate slate "
+                f"({', '.join(self.candidate_ids()) or 'empty'})."
+            )
+        self.selected_listing_id = listing_id
+        if self.phase == Phase.RESULTS_READY:
+            self.phase = Phase.FORM_FILLING
+        return self
+
+    def selected_listing(self) -> Optional[dict]:
+        """The verbatim tool record for the selected listing, if any.
+
+        M4a pre-fills the booking form from this rather than from anything
+        the model wrote (Principle I), which is why it returns the record
+        and not just the id.
+        """
+        if not self.selected_listing_id:
+            return None
+        return next(
+            (l for l in self.candidate_listings if l["id"] == self.selected_listing_id),
+            None,
+        )
+
     def available_tools(self) -> list[str]:
         """Read-only view of the tool names permitted in this session's phase.
 

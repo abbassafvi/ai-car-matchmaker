@@ -5,12 +5,13 @@ continue this project with zero re-discovery and without repeating mistakes
 already made and fixed. Read this file first, then the files listed in
 [§13 Required reading](#13-required-reading).
 
-**Last updated**: 2026-08-08, after **M3 Phase C** (T024 + T025) shipped.
-M3 is *in progress* — Phases A, B and C are done, D–F are not.
+**Last updated**: 2026-08-08, after **M3 Phase E** (T028) shipped.
+M3 is *in progress* — Phases A–E are done, **F (behavioural tests) is not**.
 
-> **Treat every claim in this file as a claim, not as truth.** Four separate
-> audits have now found docs asserting behaviour the code did not have. The
-> numbers below were measured on 2026-08-08, not copied forward. See §3.
+> **Treat every claim in this file as a claim, not as truth.** Five separate
+> audits have now found docs asserting behaviour the code did not have — and
+> one found the inverse. The numbers below were measured on 2026-08-08, not
+> copied forward. See §3.
 
 ---
 
@@ -32,7 +33,7 @@ and a *mocked* checkout **without leaving the chat**.
 |---|---|---|
 | 1 | Multistep agent: interview → research → ranked+explained recommendations | ✅ interview → auto-research → deterministic ranking + explanations, all surfaced via **A2UI** since Phase D (verified live end to end) |
 | 2 | Interview captures: use case, car type/category, budget, buy-vs-rent, target date | ✅ |
-| 3 | **Form-filling MUST be an MCP App** rendered inside the chat | ⬜ M4a |
+| 3 | **Form-filling MUST be an MCP App** rendered inside the chat | ⬜ M4a — **now unblocked**: `select_listing` exists and FORM_FILLING is reachable (Phase E) |
 | 4 | **Mock payment/checkout MUST be an MCP App** rendered inside the chat | ⬜ M4b |
 | 5 | Car catalogue + live agent progress (interview state, search status, **reasoning steps**) MUST render via **A2UI** — explicitly *"not static HTML"* | ✅ **satisfied in Phase D (T026)**. Three A2UI surfaces render live: `interview-progress`, `research-reasoning` (per-step trace with icons) and `catalogue` (ranked cards). The `{"type":"progress"}` placeholder is deleted. Verified in a real browser against the real stack |
 | 6 | No real payments, no BMW Group APIs — checkout fully mocked | ✅ by construction |
@@ -90,7 +91,8 @@ M3   🟡 IN PROGRESS — Research & Ranked Recommendations (User Story 2)
        ✅ Phase C  T024 + T025 adapter wiring, ranking, research auto-kickoff
        ✅ Phase D  T026 + T022 A2UI catalogue + reasoning surfaces, themed
                    frontend, grounding snapshot test
-       ⬜ Phase E  T028 listing selection (`select_listing` + action wiring)
+       ✅ Phase E  T028 listing selection: select_listing tool + state
+                   transition, catalogue Button, {"type":"action"} wiring
        ⬜ Phase F  T021 + T029 live behavioural tests
        ⬜ (T027 listing-detail MCP App — recommended deferred past M4)
 M4a  ⬜ Booking form MCP App (User Story 3)
@@ -100,15 +102,15 @@ M5   ⬜ Evals (observability itself is wired, M2.5/T051)
 M6   ⬜ Hardening, E2E tests, README finalization, deck, demo video
 ```
 
-**Test suite: 141 total** (measured 2026-08-08 after Phase D, not copied forward).
+**Test suite: 164 total** (measured 2026-08-08 after Phase E, not copied forward).
 
 | Suite | Tests | Gated | Files |
 |---|---|---|---|
 | `mcp-services` | **35** | 0 | `test_generate_listings` (8), `test_marketplace` (18), `test_marketplace_server` (9) |
-| `agent-backend` | **106** | 3 | 15 modules, see §7 |
+| `agent-backend` | **129** | 3 | 16 modules, see §7 |
 
-- **138 pass with no external setup** (35 + 103)
-- **All 141 pass** with a live LLM key *and* Phoenix running — verified 2026-08-08
+- **161 pass with no external setup** (35 + 126)
+- **All 164 pass** with a live LLM key *and* Phoenix running — verified 2026-08-08
 - Exactly **3** gated tests (`grep -rn skipif */tests/`): `test_interview_agent`
   and `test_chat_endpoint` (need `LLM_API_KEY`), `test_otel_setup` (needs Phoenix)
 
@@ -379,7 +381,7 @@ python mcp-services/data/generate_listings.py
 |---|---|
 | `agent/state.py` | `Phase` (6), `InterviewState`, `SessionState`, `RankedRecommendation`, `Booking`, `PaymentConfirmation`. **`TOOLS_BY_PHASE` + `tool_names_for_phase()` are the phase gate**. `save_interview_slots()` **overwrites, never appends** |
 | `agent/graph.py` | (a) M1's minimal `build_graph()`/`compiled_graph()` persistence scaffold — **keep as-is**. (b) `TOOL_REGISTRY` (name→tool), `tools_for_phase()`, `build_agent_for_phase()`, **`PhaseAgentRegistry(checkpointer, extra_tools=)`**, **`resolve_registry()`** (returns a new dict; never mutates `TOOL_REGISTRY`), `CarMatchmakerState(DeepAgentState)` carrying `session: dict` |
-| `agent/tools.py` | `save_interview_state` — a `@tool` returning a LangGraph `Command` |
+| `agent/tools.py` | `save_interview_state` and **`select_listing`** — `@tool`s returning a LangGraph `Command` |
 | `agent/prompts.py` | `PHASE_SYSTEM_PROMPTS` (a missing entry fails at startup). Listing-facing phases embed `UNTRUSTED_DATA_RULE` |
 | `agent/mcp_client.py` | **T024**: `discover_marketplace_tools()` — fail-soft MCP discovery, returns `[]` rather than raising. Never touches `TOOL_REGISTRY` |
 | `agent/ranking.py` | **T025**: deterministic `rank()` over tool-artifact records. Min-max normalised *within the slate*; `reasoning` is a template filled from record fields, never the `description` |
@@ -389,7 +391,7 @@ python mcp-services/data/generate_listings.py
 | `api/main.py` | FastAPI. `GET /health`, `WS /ws/{session_id}`. **AsyncSqliteSaver lifespan, `agent.ainvoke`, `aget_state`**, `message_text()`. **`_SurfaceStream`** owns per-connection init-vs-update for all three A2UI surfaces; a resumed session with `recommendations` gets its catalogue re-emitted on connect |
 | `observability/otel_setup.py` | `setup_observability()` → `phoenix.otel.register(..., protocol="grpc", auto_instrument=True)` |
 | `conftest.py` | Puts the service root on `sys.path` so the suite collects under a bare `pytest`, not only `python -m pytest`. Added by the Phase C audit — see §3 |
-| `tests/` | **15 modules, 106 tests** (+`test_catalogue_grounding` 24 = T022)<br>previously **14 modules, 82 tests** (`test_ranking` 12, `test_research` 17, `test_mcp_wiring` 8)<br>and before that **11 modules, 45 tests**: `test_state`(6), `test_tools`(5), `test_graph_persistence`(2), `test_render_a2ui`(8), `test_chat_endpoint`(3), `test_chat_endpoint_error_handling`(1), `test_interview_agent`(1), `test_otel_setup`(1), `test_phase_gate`(10), `test_observability_wiring`(2), `test_message_text`(6) |
+| `tests/` | **16 modules, 129 tests** (+`test_select_listing` 21 = T028b)<br>previously **15 modules, 106 tests** (+`test_catalogue_grounding` 24 = T022)<br>previously **14 modules, 82 tests** (`test_ranking` 12, `test_research` 17, `test_mcp_wiring` 8)<br>and before that **11 modules, 45 tests**: `test_state`(6), `test_tools`(5), `test_graph_persistence`(2), `test_render_a2ui`(8), `test_chat_endpoint`(3), `test_chat_endpoint_error_handling`(1), `test_interview_agent`(1), `test_otel_setup`(1), `test_phase_gate`(10), `test_observability_wiring`(2), `test_message_text`(6) |
 
 ### mcp-services (Python) — **rewritten in M3 Phase B**
 | File | Purpose |
@@ -521,11 +523,34 @@ Every one is verified, not assumed.
     tool-call result: a Principle I breach in the exact surface T022 exists
     to guard. Phase D dropped it and uses `Icon` for visual structure. Do not
     reintroduce it without adding a real, grounded image field.
-20. **Listing selection (Phase E)**: `new MessageProcessor(catalogs,
+20. **Listing selection (done, Phase E)**: `new MessageProcessor(catalogs,
     actionHandler, options)` — the **2nd constructor arg is a global
-    `ActionListener`** `(action: A2uiClientAction) => void`. That is how a
-    card `Button`'s `action` gets back to us. The WS handler currently accepts
-    only `{"type":"chat"}` — a new inbound message type is needed.
+    `ActionListener`**. That is how a card `Button`'s `action` gets back to
+    us, and `{"type":"action"}` now carries it to the backend.
+
+20a. 🔴 **The listener receives a DIFFERENT shape than the component
+    declares.** A component declares its handler under **`event`**
+    (`action: {event: {name, context}}`, server→client). What the
+    `ActionListener` receives is the **client→server** envelope, which nests
+    it under **`action`** and adds `surfaceId`/`sourceComponentId`/
+    `timestamp`. Reading `.event` in the listener matched nothing, so the
+    button did nothing at all — no error, no network request, no clue in the
+    console. Pinned against the installed `A2uiClientActionSchema`.
+
+20b. **An action's `context` value may be a DataBinding, and it resolves
+    per-row inside a template.** `resolveAction` runs on the row's own
+    `DataContext`, so one templated `Button` with
+    `context: {listing_id: {path: "id"}}` sends the right id per card —
+    no need for one component per card. Verified by reading web_core and
+    then by clicking the third card and getting the third listing's id.
+
+20c. 🔴 **A UI action runs no graph, so nothing checkpoints it.** LangGraph
+    persists as a side effect of *running*; a button click mutates state
+    outside any run, so the selection lived only in the WebSocket handler's
+    local variable — it rendered correctly and vanished on reload. Use
+    **`aupdate_state(config, {...})`** to write state outside a run. Note
+    that unit tests asserting on what the handler *returns* cannot catch
+    this; assert on what a later `_load_session` reads back.
 21. **`@a2ui/react@0.10.2`'s `"./styles/structural.css"` export is broken** —
     points at a file not in the published package. Import dropped; components
     render unstyled but functional. Styling is an open item (§11).
@@ -646,47 +671,51 @@ Full text in `.specify/memory/constitution.md`.
 
 ---
 
-## 10. NEXT UP: M3 Phase E — start here
+## 10. NEXT UP: M3 Phase F — start here
 
-### What Phase D left you
+### What Phase E left you
 
-Phase D (T026 + T022) is **done, verified live in a browser, and pushed**.
-Three A2UI surfaces now render — `interview-progress`, `research-reasoning`
-and `catalogue` — and hard requirement #5 is satisfied. What Phase E
-inherits:
+Phase E (T028) is **done, verified live in a browser, and pushed**. US2 is
+now complete end to end: interview → auto-research → ranked A2UI catalogue →
+listing selection → FORM_FILLING. What remains in M3 is Phase F, which is
+**tests, not features**.
 
-| Produced by Phase D | Where | Phase E uses it for |
-|---|---|---|
-| `catalogue` surface, `List` of `Card` per listing | `agent/render_a2ui.py::_catalogue_components` | adding a per-card `Button` |
-| `id` already carried on every catalogue row (unrendered) | `_catalogue_rows` | the `Button`'s `action.context` — the selected listing id |
-| `_SurfaceStream` (per-connection init-vs-update) | `api/main.py` | re-emitting the tree once a Button is added |
-| Themed, non-broken frontend | `frontend/src/{app,a2ui-theme}.css` | styling the button |
+| Produced by Phase E | Where |
+|---|---|
+| `SessionState.select_listing()` — the third and last phase transition | `agent/state.py`, beside `save_interview_slots` / `record_research` |
+| `SessionState.selected_listing()` — the verbatim record | `agent/state.py` — **M4a pre-fills the booking form from this**, not from model prose |
+| `select_listing` tool (model path) | `agent/tools.py`, registered in `TOOL_REGISTRY` |
+| Catalogue `Button` + `{"type":"action"}` handling | `render_a2ui._catalogue_components`, `api/main._handle_action` |
+| `_persist_session` (`aupdate_state`) | `api/main.py` — writes state when no graph runs (§8.20c) |
 
-**The one thing Phase D deliberately did not do**: the catalogue has no
-`Button` yet. A2UI's `Button` requires an `action`, and the whole action
-path — `MessageProcessor`'s `ActionListener` (§8.20), an inbound
-`{"type":"action"}` WS message, and `select_listing` itself — is Phase E.
-Shipping a button that did nothing in front of a judge was the worse option.
-So Phase E is one coherent slice, not two halves:
+⚠️ **FORM_FILLING is reachable but empty until M4a.** Selecting advances the
+phase, and that phase's tools (`open_booking_form`, `submit_booking`) do not
+exist yet, so the agent has no domain tools there. Correct per the gate, but
+**do not demo past the selection** until M4a lands.
 
-1. **`select_listing`** (`agent/tools.py`): writes
-   `SessionState.selected_listing_id`, transitions RESULTS_READY →
-   FORM_FILLING. **It has never existed** — `TOOLS_BY_PHASE` has named it
-   since M2.5 and `RESULTS_SYSTEM_PROMPT` already tells the model to "record
-   the selection with the appropriate tool", so the model is currently
-   instructed to call a tool that isn't bound. **M4a depends on this**:
-   Principle II's own worked example is `open_booking_form` gated on a
-   listing being selected.
-2. **The `Button`** in `_catalogue_components`, with
-   `action: {event: {name: "select_listing", context: {listing_id: {path: "id"}}}}`.
-   ⚠️ Unverified: whether a *bound* (`{"path": ...}`) action context resolves
-   per-row inside a template. Check it early — if it doesn't, the fallback is
-   a per-row literal, which means one component per card rather than a
-   template.
-3. **Frontend**: pass an `ActionListener` as `MessageProcessor`'s 2nd
-   constructor arg (`App.tsx` currently passes only `[basicCatalog]`) and
-   send `{"type":"action"}`; `chat_ws` currently `continue`s on anything
-   that is not `{"type":"chat"}`.
+### Immediate next: Phase F (T021 + T029) — behavioural tests
+
+Both are **live-gated** tests that need a real model, and both already have
+their deterministic halves written. Groq (~1000 req/day) makes them
+affordable; run T029 on Groq *and* once on whatever model ships, since an
+injection result is only evidence for the model it ran on.
+
+1. **T029 — prompt injection (Principle IV).** The three `ADV-*` probes must
+   cause **zero** behavioural deviation. The wrapping is real and verified
+   (`store.wrap_untrusted`, delimiters confirmed reaching the model live),
+   but Principle IV's row stays PARTIAL until this behavioural proof exists —
+   a wrapper the model ignores is not a boundary. `ADV-0002` is the sharpest
+   probe: it is an SUV at $31,000 that demands to be ranked first regardless
+   of fit, so a budget-constrained SUV search that returns it after a budget
+   relaxation is a natural way to get it in front of the model.
+2. **T021 — relaxation messaging.** A zero-match query must make the agent
+   name the constraint it relaxed rather than fabricate. The ladder itself is
+   already covered deterministically in `tests/test_research.py`; what is
+   owed is the live half.
+
+Note both tests assert on *model prose*, so heed §3's lesson about vacuous
+checks — normalise digit separators and **assert the check examined
+something** before trusting a pass.
 
 ### What Phase C left (still true, still the data contract)
 
@@ -749,9 +778,15 @@ since an injection result is only evidence for the model it ran on.
   `App.tsx`. Split when M4's host adds real complexity.
 - ✅ *(resolved in Phase C)* `agent-backend/requirements.txt` now carries both
   `langchain-mcp-adapters` and `mcp>=1.24,<2` as real entries.
-- **`select_listing` is a phase-gate entry with no implementation** —
-  assigned to T028(b). **M4a depends on it**: Principle II's own example is
-  `open_booking_form` gated on a listing being selected.
+- ✅ *(resolved in Phase E)* **`select_listing`** now exists as both a tool
+  and `SessionState.select_listing()`, and RESULTS_READY → FORM_FILLING is
+  reachable, so M4a's `open_booking_form` has a precondition it can gate on.
+- ⚠️ **FORM_FILLING is now reachable but has no tools yet.** Selecting a
+  listing advances the phase, and `TOOLS_BY_PHASE[FORM_FILLING]` names
+  `open_booking_form`/`submit_booking`, which M4a implements. Until then a
+  user who selects a car gets a confirmation and then an agent with no
+  domain tools. Correct per the gate, but it is a dead end until M4a — do
+  not demo past the selection yet.
 - 🔴 **The demo's headline path still opens on a constraint relaxation.**
   §3b fixed the *price* floor so US2 AS1 matches 4 SUVs, but every real
   session also applies `target_date`, and **0** of those 4 are available

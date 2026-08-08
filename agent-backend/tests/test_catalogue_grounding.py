@@ -324,6 +324,39 @@ def test_every_surface_declares_a_component_with_the_id_root(components_of):
     assert "root" in ids, f"no component with id 'root'; surface will not render (ids: {ids})"
 
 
+def test_each_card_carries_a_select_button_wired_to_its_own_listing():
+    """The Button is the only interactive element in the catalogue and its
+    whole job is to carry the *right* listing id. A2UI resolves an action
+    against the per-row data context, so the binding must reference a field
+    that exists on every row -- a literal or a typo'd path would send the
+    same (or no) id for every card.
+    """
+    from agent.render_a2ui import SELECT_LISTING_ACTION
+
+    components = build(SLATE)[0][1]["updateComponents"]["components"]
+    buttons = [c for c in components if c["component"] == "Button"]
+
+    assert len(buttons) == 1, "one templated Button, not one per card"
+    action = buttons[0]["action"]["event"]
+    assert action["name"] == SELECT_LISTING_ACTION
+    assert action["context"]["listing_id"] == {"path": "id"}
+    # Button requires both child and action in v0.9.
+    assert buttons[0]["child"] and buttons[0]["action"]
+
+    rows = rows_from(build(SLATE)[0])
+    assert {row["id"] for row in rows} == {l["id"] for l in SLATE}
+
+
+def test_selected_card_is_marked_and_only_that_card():
+    rows = rows_from(build_catalogue_surface_init(
+        SLATE, rank(SLATE, INTERVIEW), INTERVIEW, "LST-0088",
+    ))
+    labels = {row["id"]: row["select_label"] for row in rows}
+
+    assert labels["LST-0088"] == "✓ Selected"
+    assert all(v == "Choose this one" for k, v in labels.items() if k != "LST-0088")
+
+
 def test_no_image_component_is_used():
     """A2UI v0.9's Image requires a `url`, and no listing record carries one.
     Any Image here would be rendering a URL that traces to no tool-call

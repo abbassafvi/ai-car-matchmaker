@@ -663,9 +663,36 @@ decision for the user** and should be settled before Phase C starts.
       **Recommended deferred past M4a/M4b**: this is the explicitly *additive
       secondary* surface, while the booking-form and checkout MCP Apps are
       hackathon hard requirements #3 and #4.
-- [ ] T028 [US2] `frontend`: render reasoning-steps + catalogue surfaces;
-      wire listing selection back to the agent. Two halves, and the audit
-      found only one of them had an owner:
+- [x] T028 [US2] `frontend`: render reasoning-steps + catalogue surfaces;
+      wire listing selection back to the agent. **DONE (Phase E)**, shipped
+      as one slice so the Button was never dead: `select_listing` (tool +
+      `SessionState.select_listing`), the catalogue Button, the inbound
+      `{"type":"action"}` message and the frontend `ActionListener`.
+      Covered by `tests/test_select_listing.py` (21 tests).
+      **Design**: the click is applied in **code**, not described to the
+      model — it reaches the same `SessionState.select_listing` the tool
+      does, so a click and "I'll take the Jeep" cannot diverge, and a test
+      pins that they produce identical state. The id from the browser is
+      untrusted: anything outside the persisted candidate slate is refused,
+      so a tampered or stale id cannot select a listing the marketplace
+      never returned (Principle I).
+      **Two bugs found only by clicking the button:**
+      (a) **The ActionListener receives a different shape than the component
+      declares.** A component declares its handler under `event`
+      (server→client); the listener receives the *client→server* envelope,
+      which nests it under `action` plus surfaceId/sourceComponentId/
+      timestamp. Reading `.event` matched nothing, so the button did
+      nothing at all — no error, no request, no clue.
+      (b) 🔴 **A click was never persisted.** `_handle_action` updated the
+      handler's local session and re-rendered, but LangGraph only
+      checkpoints as a side effect of *running*, and a click runs no graph.
+      The selection looked applied and vanished on reload. Fixed with
+      `aupdate_state`. Every unit test written before this asserted on the
+      value `_handle_action` returns, which is exactly why none caught it;
+      the regression test now asserts on what a later `_load_session` reads
+      back.
+      Original analysis follows — two halves, and the audit found only one
+      of them had an owner:
       (a) *Frontend*: pass a global `ActionListener` as `MessageProcessor`'s
       **2nd** constructor argument (`App.tsx:30` currently passes only
       `[basicCatalog]`; signature re-verified against the installed

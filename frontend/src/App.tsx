@@ -31,7 +31,39 @@ export default function App() {
   const [connected, setConnected] = useState(false);
   const wsRef = useRef<WebSocket | null>(null);
   const logRef = useRef<HTMLDivElement | null>(null);
-  const [processor] = useState(() => new MessageProcessor([basicCatalog]));
+  // MessageProcessor's 2nd constructor argument is a global ActionListener:
+  // it receives every action dispatched by any component on any surface
+  // (e.g. a catalogue card's "Choose this one" Button). Relayed to the
+  // backend as {"type":"action"}, where it is applied in code.
+  //
+  // wsRef rather than a state value on purpose: this listener is created
+  // once with the processor and would otherwise close over the socket as it
+  // was on first render, which is null.
+  const [processor] = useState(
+    () =>
+      new MessageProcessor([basicCatalog], (clientAction) => {
+        const ws = wsRef.current;
+        if (!ws || ws.readyState !== WebSocket.OPEN) return;
+
+        // Mind the key. The component *declares* its handler under `event`
+        // (server -> client), but what the listener receives is the
+        // client -> server envelope, which nests it under `action` and adds
+        // surfaceId/sourceComponentId/timestamp. Reading `.event` here
+        // silently matched nothing and the button did nothing at all --
+        // no error, no request. Verified against the installed
+        // A2uiClientActionSchema.
+        const payload =
+          (clientAction as { action?: { name?: string; context?: Record<string, unknown> } })
+            .action ?? (clientAction as { name?: string; context?: Record<string, unknown> });
+        if (!payload?.name) return;
+
+        ws.send(JSON.stringify({
+          type: "action",
+          name: payload.name,
+          context: payload.context ?? {},
+        }));
+      }),
+  );
   const [surfaces, setSurfaces] = useState(() =>
     Array.from(processor.model.surfacesMap.values()),
   );

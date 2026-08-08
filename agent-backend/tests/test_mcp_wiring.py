@@ -56,9 +56,9 @@ def test_injected_tools_resolve_for_the_phases_the_gate_names_them_for():
     assert researching == {"search_listings", "get_listing_details"}
 
     results_ready = {t.name for t in tools_for_phase(Phase.RESULTS_READY, resolved)}
-    # select_listing is named by the gate but not implemented yet (T028b),
-    # so it legitimately resolves to nothing.
-    assert results_ready == {"search_listings", "get_listing_details"}
+    # select_listing landed in Phase E (T028b); before that it was named by
+    # the gate and resolved to nothing, which this assertion used to record.
+    assert results_ready == {"search_listings", "get_listing_details", "select_listing"}
 
 
 def test_injection_cannot_widen_the_gate():

@@ -17,10 +17,12 @@ is built, the agent runs fully async against it, and interview → automatic
 research → deterministically ranked, explained recommendations now works end
 to end and **renders live as A2UI surfaces**: an interview checklist, a
 reasoning-steps trace of how the search ran, and a catalogue of ranked cards.
-Listing selection and the in-chat MCP Apps are the remaining M3/M4 work.
+Listing selection works too — each catalogue card has a button that records
+the choice and advances the phase. The in-chat MCP Apps (booking form, mock
+checkout) are the remaining M4 work.
 
-**141 automated tests**, of which **138 run with no external setup at all**
-(35 `mcp-services` + 103 `agent-backend`); the remaining 3 need a live LLM key
+**164 automated tests**, of which **161 run with no external setup at all**
+(35 `mcp-services` + 126 `agent-backend`); the remaining 3 need a live LLM key
 and/or a running Phoenix and auto-skip without them. Plus live end-to-end
 verification against a real Docker Compose build. See
 [`specs/001-ai-car-matchmaker/`](specs/001-ai-car-matchmaker/) for the full

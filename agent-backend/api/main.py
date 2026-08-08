@@ -17,6 +17,7 @@ NotImplementedError. Verified empirically before making this change.
 
 Message envelope (both directions):
   {"type": "chat", "content": "..."}                 -- chat text
+  {"type": "action", "name": ..., "context": {...}}   -- A2UI surface action (client -> agent only)
   {"type": "a2ui", "messages": [...]}                 -- A2UI protocol messages (agent -> client only)
   {"type": "error", "message": "..."}                 -- graceful failure (agent -> client only)
 
@@ -57,6 +58,7 @@ from agent.render_a2ui import (  # noqa: E402
     CATALOGUE_SURFACE_ID,
     INTERVIEW_SURFACE_ID,
     REASONING_SURFACE_ID,
+    SELECT_LISTING_ACTION,
     build_catalogue_surface_init,
     build_catalogue_surface_update,
     build_interview_surface_init,
@@ -221,11 +223,88 @@ def _catalogue_inputs(session: dict) -> tuple[list[dict], list[RankedRecommendat
 
 async def _send_catalogue(surfaces: _SurfaceStream, session: dict) -> None:
     listings, recommendations, interview = _catalogue_inputs(session)
+    selected = session.get("selected_listing_id")
     await surfaces.send(
         CATALOGUE_SURFACE_ID,
-        lambda: build_catalogue_surface_init(listings, recommendations, interview),
-        lambda: build_catalogue_surface_update(listings, recommendations, interview),
+        lambda: build_catalogue_surface_init(listings, recommendations, interview, selected),
+        lambda: build_catalogue_surface_update(listings, recommendations, interview, selected),
     )
+
+
+async def _persist_session(agents, config, session: dict) -> None:
+    """Write `session` into the checkpointer without running the agent.
+
+    Needed because a UI action mutates state outside any graph execution,
+    and LangGraph only checkpoints as a side effect of running. Without
+    this, a selection lived only in the WebSocket handler's local variable:
+    the catalogue showed it, and a reconnect silently lost it -- which the
+    unit tests could not catch, because they assert on the value
+    `_handle_action` returns rather than on what a later `_load_session`
+    reads back. Found by clicking the button and reloading the page.
+
+    `aupdate_state` is LangGraph's supported way to write state outside a
+    run. It is a no-op when no agent exists (no LLM key), which leaves the
+    selection in-memory for that session only -- acceptable, since a
+    keyless deployment cannot progress to booking anyway.
+    """
+    if agents is None:
+        return
+    await agents.for_phase(Phase.INTERVIEWING).aupdate_state(config, {"session": session})
+
+
+async def _handle_action(
+    websocket: WebSocket, incoming: dict, session: dict, surfaces: _SurfaceStream,
+    agents=None, config=None,
+) -> dict:
+    """Apply a UI action from an A2UI surface (T028).
+
+    A button click is a *direct user instruction*, so it is applied in code
+    rather than described to the model and hoped for -- the same reason the
+    phase transitions live in `SessionState` (Principle II). It reaches
+    `SessionState.select_listing`, which is the identical code path the
+    `select_listing` tool uses, so clicking a card and saying "I'll take the
+    Jeep" cannot diverge.
+
+    The listing id arriving from the client is untrusted input like any
+    other: `select_listing` rejects anything outside the persisted candidate
+    slate, so a tampered or stale id cannot select a listing that was never
+    recommended.
+    """
+    if incoming.get("name") != SELECT_LISTING_ACTION:
+        log.warning("Ignoring unknown UI action %r", incoming.get("name"))
+        return session
+
+    listing_id = (incoming.get("context") or {}).get("listing_id")
+    state = SessionState.model_validate(session)
+    try:
+        state.select_listing(listing_id)
+    except ValueError as exc:
+        log.warning("Rejected listing selection %r: %s", listing_id, exc)
+        await websocket.send_json({
+            "type": "error",
+            "message": "That listing is no longer available to select. Try searching again.",
+        })
+        return session
+
+    session = state.model_dump(mode="json")
+    listing = state.selected_listing() or {}
+    await _persist_session(agents, config, session)
+
+    # Re-render so the chosen card shows as selected, then confirm in chat.
+    # Deterministic text, not a model turn: the confirmation restates values
+    # from the tool record, and spending an LLM round trip to say "got it"
+    # would add latency and a hallucination surface for no benefit.
+    await _send_catalogue(surfaces, session)
+    await websocket.send_json({
+        "type": "chat",
+        "role": "assistant",
+        "content": (
+            f"Got it — you've chosen the {listing.get('year')} "
+            f"{listing.get('brand')} {listing.get('model')} ({listing_id}). "
+            "Booking comes next."
+        ),
+    })
+    return session
 
 
 async def _run_research_turn(
@@ -337,6 +416,17 @@ async def chat_ws(websocket: WebSocket, session_id: str):
     try:
         while True:
             incoming = await websocket.receive_json()
+
+            # A2UI surface actions (button clicks) are applied in code and
+            # need no LLM, so they are handled before the agent-required
+            # guard below -- a user can still pick a listing from the
+            # catalogue of a resumed session when no key is configured.
+            if incoming.get("type") == "action":
+                session = await _handle_action(
+                    websocket, incoming, session, surfaces, agents, config
+                )
+                continue
+
             if incoming.get("type") != "chat" or not incoming.get("content"):
                 continue
 

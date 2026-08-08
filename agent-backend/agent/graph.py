@@ -17,7 +17,7 @@ from langgraph.graph import END, START, StateGraph
 from agent.llm import build_model
 from agent.prompts import PHASE_SYSTEM_PROMPTS
 from agent.state import Phase, SessionState, tool_names_for_phase
-from agent.tools import save_interview_state
+from agent.tools import save_interview_state, select_listing
 
 
 class GraphState(TypedDict):
@@ -61,6 +61,7 @@ class CarMatchmakerState(DeepAgentState):
 # silently exposing something they shouldn't.
 TOOL_REGISTRY = {
     "save_interview_state": save_interview_state,
+    "select_listing": select_listing,
 }
 
 

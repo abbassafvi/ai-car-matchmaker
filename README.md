@@ -22,13 +22,16 @@ the choice and advances the phase. **User Story 2 is complete**, including
 its two behavioural guarantees, both proven against a live model: the three
 seeded prompt-injection listings cause zero deviation, and a search that
 matches nothing is widened *and said so*. The in-chat MCP Apps (booking
-form, mock checkout) are the remaining M4 work.
+form, mock checkout) are the remaining M4 work: the **booking MCP App server
+and its form bundle now exist and are verified** (M4a Phases A+B), but
+nothing opens the form in the chat yet — that is the rest of M4a.
 
-**202 automated tests**, of which **193 run with no external setup at all**
-(39 `mcp-services` + 154 `agent-backend`); the remaining 9 need a live LLM key
-and/or a running Phoenix and auto-skip without them. All 202 have been run
-green together against a live model and a running Phoenix. Plus live end-to-end
-verification against a real Docker Compose build. See
+**246 automated tests**, of which **237 run with no external setup at all**
+(83 `mcp-services` + 154 `agent-backend`); the remaining 9 need a live LLM key
+and/or a running Phoenix and auto-skip without them. The 202 tests that
+existed on 2026-08-08 have been run green together against a live model and a
+running Phoenix; the 44 added since need no external setup and none is gated.
+Plus live end-to-end verification against a real Docker Compose build. See
 [`specs/001-ai-car-matchmaker/`](specs/001-ai-car-matchmaker/) for the full
 spec-driven-development trail:
 
@@ -42,7 +45,7 @@ spec-driven-development trail:
 ```
 frontend (React + Vite)          agent-backend (Python)         mcp-services (Python)
  ├─ A2UI renderer (@a2ui/react)  LangChain DeepAgents    ◄──►   marketplace ✅ (live)
- └─ MCP-Apps host (iframes, M4)  LangGraph +                    booking / payment (M4)
+ └─ MCP-Apps host (iframes, M4a) LangGraph +                    booking (live) / payment (M4b)
         │                        AsyncSqliteSaver               MCP over Streamable HTTP
         │ WebSocket                     │
         └──────────────────►    Arize Phoenix (OTel traces)
@@ -76,14 +79,19 @@ the backend dying at startup.
 | Frontend | http://localhost:3000 |
 | Agent backend (health) | http://localhost:8000/health |
 | Agent backend (chat) | ws://localhost:8000/ws/{session_id} |
-| MCP services (health) | http://localhost:8100/health |
-| MCP services (protocol) | http://localhost:8100/mcp |
+| MCP services — marketplace (health) | http://localhost:8100/health |
+| MCP services — marketplace (protocol) | http://localhost:8100/mcp |
+| MCP services — booking (health) | http://localhost:8100/booking/health |
+| MCP services — booking (protocol) | http://localhost:8100/booking/mcp |
 | Phoenix (traces UI) | http://localhost:16006 |
 
-`mcp-services` now runs a real MCP server over Streamable HTTP exposing
-`search_listings` and `get_listing_details` over the 203-listing mock
-dataset; the booking and payment servers land in M4. The agent discovers
-those tools at startup, so `agent-backend`'s `/health` reports
+`mcp-services` runs **two** MCP servers over Streamable HTTP in one process:
+**marketplace** at `/mcp` (`search_listings`, `get_listing_details` over the
+203-listing mock dataset) and **booking** at `/booking/mcp`
+(`open_booking_form`, `submit_booking`, plus the `ui://booking/form.html`
+MCP App resource). The payment server lands in M4b. The agent currently
+discovers only the marketplace tools at startup, so `agent-backend`'s
+`/health` reports
 `mcp_connected` alongside `llm_configured` — `status` is `degraded` if
 either is missing.
 
@@ -114,16 +122,34 @@ Two test categories auto-skip without extra setup rather than failing:
 - The Phoenix tracing test skips unless Phoenix is running:
   `docker compose up -d phoenix`
 
-Note that the skip is on key *presence*. With a key set but out of
-quota/credit, those tests **fail** rather than skip — that is a real
-failure, but check the provider account before assuming a code bug.
+### Rebuilding the booking form (MCP App)
+
+`mcp-services/booking/static/form.html` is a **committed build artifact** —
+one self-contained HTML file produced from `mcp-apps-ui/booking-form/`, so
+the Python image needs no Node stage. After editing anything under
+`mcp-apps-ui/booking-form/src/`:
+
+```bash
+(cd mcp-apps-ui/booking-form && npm install && npm run build)
+```
+
+⚠️ **Nothing detects a stale bundle** — the test suite passes green against
+an out-of-date `form.html`. The build itself does refuse to install one that
+references external assets (a sandboxed, opaque-origin iframe cannot load
+them) or that is missing the MCP Apps handshake.
+
+The gate itself is on key *presence*, but an out-of-quota key no longer
+reads as a bug: a provider 429 that names a quota is routed through
+`skip_if_quota_exhausted`, so those tests **skip** with the provider's own
+message rather than going red. Anything that is not an explicit quota signal
+still re-raises.
 
 ## Tech stack
 
 - **Agent harness**: [LangChain DeepAgents](https://docs.langchain.com/labs/deep-agents/overview) (LangGraph)
 - **LLM provider**: config, not code. `LLM_PROVIDER=google` uses [Google Gemini](https://ai.google.dev/) via the native `langchain-google-genai` client (default `gemini-3.6-flash`); `LLM_PROVIDER=openai_compatible` uses any OpenAI-compatible API. Development runs on [Groq](https://groq.com/) (`openai/gpt-oss-120b`), keeping the scarce Gemini quota for demo rehearsal. Groq's free tier is generous on request count but capped at **200,000 tokens/day** — roughly 66 agent turns here, since the DeepAgents harness binds ~2,700 tokens of tool schemas into every request
-- **Tool protocol**: [MCP](https://modelcontextprotocol.io/) (Python SDK, Streamable HTTP) — marketplace server live; booking/payment in M4
-- **In-chat transactional UI**: [MCP Apps](https://apps.extensions.modelcontextprotocol.io/) — booking form + mock checkout (sandboxed iframes) — M4
+- **Tool protocol**: [MCP](https://modelcontextprotocol.io/) (Python SDK, Streamable HTTP) — marketplace **and** booking servers live at `/mcp` and `/booking/mcp`; payment in M4b
+- **In-chat transactional UI**: [MCP Apps](https://apps.extensions.modelcontextprotocol.io/) (`@modelcontextprotocol/ext-apps` 1.7.5) — the booking form is built and served as a `ui://` resource; rendering it in the chat and the mock checkout are the rest of M4
 - **Generative UI**: [A2UI](https://a2ui.org/) v0.9 protocol via the real [`@a2ui/react`](https://www.npmjs.com/package/@a2ui/react) renderer — car catalogue + live agent progress/reasoning
 - **Observability**: [Arize Phoenix](https://arize.com/docs/phoenix) via OpenTelemetry
 - **Spec process**: [spec-kit](https://github.com/github/spec-kit)

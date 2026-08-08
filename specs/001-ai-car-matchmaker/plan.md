@@ -125,7 +125,7 @@ mock listings
 |---|---|---|
 | I. Grounded Recommendations | UI values sourced only from tool-call records, never LLM-retyped | **PASS at the A2UI surfaces (since M3 Phase D)**, with one residual noted below. The catalogue renders from `SessionState.candidate_listings` + `.recommendations` only; `test_catalogue_grounding.py` compares every rendered value back to its source record and asserts its own non-vacuity, and a live run confirmed all 16 catalogue values byte-identical to `listings.json`. **Residual**: the chat narration is still model-authored prose, and while `narration_brief` forbids any number not printed in the brief, that constraint is prompt-enforced rather than structural — the *grounded* channel is the catalogue. T029/T046 measure the prose. Previously recorded as: PARTIAL (materially advanced in M3 Phase C) — listing data now reaches the user, and it is grounded end to end: the search query is built from persisted interview state rather than from the model (`agent/research.py`), ranking is deterministic Python over the tool artifact (`agent/ranking.py`), and the verbatim records are persisted in `SessionState.candidate_listings`. Verified live: four recommended listings byte-identical to `listings.json` on price/year/mileage/category, and all 11 numbers in the model's narration traceable to the slate. Still PARTIAL because the **A2UI surface** is the part the principle names and that is T026/T022 (Phase D) — today the values reach the user as chat prose |
 | II. Explicit Phase Gating | Transactional tools unavailable outside their phase | PASS (since M2.5, completed M3 Phase E) — `TOOLS_BY_PHASE` in `agent/state.py` is the single gate definition and `agent/graph.py` builds one agent per phase from it. **All three phase transitions are now code paths in `SessionState`** (`save_interview_slots`, `record_research`, `select_listing`), none of them a model decision. Phase E closed the last hole: `select_listing` had been *named* by the gate since M2.5 with nothing implementing it, so Principle II's own worked example — `open_booking_form` gated on a listing being selected — had no precondition anything could satisfy. Covered by `test_phase_gate.py`, `test_mcp_wiring.py`, `test_select_listing.py`. **Caveat**: `FORM_FILLING` is now reachable but its tools land in M4a |
-| III. Mock-Only Transactions | No real payment path exists | PENDING — nothing to enforce yet; `confirm_mock_payment` lands in M4b |
+| III. Mock-Only Transactions | No real payment path exists | PENDING, but **now partly enforced ahead of time** (M4a Phase A). The booking form has no payment field at all, and `booking/store.py`'s `FIELDS` is an allowlist that `normalise()` applies *before* validation and persistence, so a card number submitted into a tampered form is discarded at the boundary rather than filtered later. Tests assert both the schema property and the runtime drop. `confirm_mock_payment` and the real enforcement point still land in M4b |
 | IV. Untrusted Data Boundary | Listing/user text never treated as instructions | **PASS on `openai/gpt-oss-120b` (since M3 Phase F)**, with one caveat below. The rule is in every listing-facing prompt, `store.wrap_untrusted()` genuinely emits the delimiters server-side, and **T029 now supplies the behavioural proof**: all three `ADV-*` probes reach the model inside the delimiters and cause zero deviation — no fabricated `$1` price, no unrequested `select_listing` call, no phase advance, no system-prompt or credential disclosure, and the deterministic ranking byte-identical across the model turn. A fourth test asserts the probes do not derail the turn either, since a boundary enforced by refusing to answer is not a win. Run against **both** shipped models: Groq `openai/gpt-oss-120b` and Gemini `gemini-3.6-flash`, clean on each. An injection result is only evidence for the model it ran on, so re-run T029 whenever the model changes. Previously recorded as: PARTIAL (improved in M3 Phase B) — the *rule* is in every listing-facing prompt (`agent/prompts.py`), and the delimiters it refers to are now genuinely emitted: `store.wrap_untrusted()` wraps each `description` server-side, at the tool-output boundary, before it can reach the model. Confirmed live that the `ADV-0001` payload arrives inside the delimiters via `langchain-mcp-adapters`. Still PARTIAL because what remains is the **behavioural** proof — T029 must show the three `ADV-*` probes cause zero deviation. A wrapper the model ignores is not a boundary |
 | V. Full Observability | Every call/transition traced | PASS (since M2.5) — `setup_observability()` is called from the FastAPI lifespan before any agent is built; covered by `test_observability_wiring.py` + `test_otel_setup.py` |
 
@@ -271,6 +271,49 @@ because the falsehood is in what it asserts *about* the search. Grounding
 checks cannot be the last line of defence between a user and a lie — and
 "the docs are accurate" is not evidence that anything works.
 
+### Correction (M4a Phases A+B / the 2026-08-09 audit)
+
+A seventh audit, run after M4a's server and form bundle shipped but **before**
+Phase C wired them to the agent. It found a **new variant** again: every prior
+audit examined behaviour already reachable by a user. This one examined code
+that was committed, tested, green — and **not yet called by anything** — and
+found four latent defects that Phase C would have shipped. No test could have
+caught them, because there was nothing to test against yet.
+
+The two that bear on this table:
+
+- **Principle I would have been violated by construction in FORM_FILLING.**
+  `open_booking_form`'s MCP schema is `{listing: object}`, **required** — the
+  whole record. `TOOLS_BY_PHASE[FORM_FILLING]` names it as a *model* tool, so
+  binding it directly means the model retypes every price, year and mileage
+  as tool arguments. In the exact phase Principle II's own worked example is
+  about. Fix: local `@tool` wrappers with `InjectedState` that read
+  `SessionState.selected_listing()` and pass the verbatim record server-side.
+- **Principle II's gate table was about to acquire a second lie.**
+  `submit_booking` takes free-form `fields`, so a model-facing version could
+  fabricate the user's name and email into a booking they never made. Decided
+  2026-08-09: **`submit_booking` is not model-callable**, reachable only
+  through the MCP App bridge, and the gate table is corrected to match — a
+  name in that table that nothing binds is exactly the hole M2.5 left with
+  `select_listing`.
+
+Also found, and material to Principle II: **the click path and the prose path
+diverge again in FORM_FILLING.** The gate binds no `select_listing` there, so
+"actually, the Kia" has no tool — but `_handle_action` runs *before* the gate
+and bypasses it, so clicking another card still works. Phase E's convergence
+guarantee turned out to be a property of one phase, not of the design. And
+re-selecting leaves a **stale booking** attached to the previous listing,
+which spec.md's Edge Cases explicitly forbid.
+
+Full finding list, severities and repros: HANDOFF §14.
+
+Eighth lesson: **unwired code is unaudited code.** A milestone that lands a
+server, a schema or a bundle before anything calls it gets a fully green suite
+with zero coverage of how it will actually be used. Read a new tool's *input
+schema* and ask who fills it in — a signature that is convenient for code to
+call can be a constitution violation for a model to call, and nothing in the
+tests will say so.
+
 Known deviation, accepted: `create_deep_agent` always installs
 `FilesystemMiddleware`, which binds nine built-in tools (`ls`, `read_file`,
 `write_file`, `edit_file`, `delete`, `glob`, `grep`, `execute`, `task`) in
@@ -344,11 +387,29 @@ docker-compose.yml                  # frontend, agent-backend, mcp-services, pho
 
 **Structure Decision**: Multi-service web application (Option 2 variant),
 extended from 2 services (backend/frontend) to 4 logical units because MCP
-servers must be independently network-addressable (Streamable HTTP) from
-both the agent backend and, for `ui://` resource fetches, the frontend's
-MCP-Apps host — collapsing them into the agent-backend process would break
+servers must be independently network-addressable (Streamable HTTP) from the
+agent backend — collapsing them into the agent-backend process would break
 that addressability. `mcp-apps-ui` is deliberately not a running service:
-it produces static assets consumed by `mcp-services` at serve time.
+it produces a static asset committed into `mcp-services` and served as the
+`ui://` resource.
+
+**Corrected 2026-08-09 (M4a).** This paragraph previously also said the
+**frontend's** MCP-Apps host fetches `ui://` resources directly from
+`mcp-services`. That was never built and is not the design taken: it would
+put a second MCP client in the browser (plus CORS), and — worse — a form
+submitted straight to `mcp-services` would bypass agent-backend entirely,
+while the `FORM_FILLING → AWAITING_PAYMENT` transition and the `Booking`
+record live in the backend's checkpointer. **The backend reads the `ui://`
+resource over MCP and pushes the HTML to the frontend over the existing
+WebSocket**, and the host tunnels the App's `tools/call` back the same way
+(`AppBridge` accepts a null MCP client; `oncalltool` is a public setter).
+One wire contract, one source of session truth.
+
+**Also corrected**: `mcp-services` is described above as "3 MCP servers, one
+process". Until M4a that was aspirational — the container ran a single app
+(`marketplace.server:app`). As of M4a Phase A it is real: `mcp-services/app.py`
+mounts marketplace at `/mcp` (unchanged) and booking at `/booking/mcp`, and
+the Dockerfile runs `app:app`. Payment joins at `/payment/mcp` in M4b.
 
 ## Complexity Tracking
 

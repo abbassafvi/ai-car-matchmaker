@@ -868,25 +868,110 @@ against Gemini (~5 requests). **M3 verification is complete.**
 
 ### Tests for User Story 3
 
+**Status 2026-08-09**: Phases A and B shipped (T033 server half, T032).
+**Phase C is next and starts with the audit worklist in HANDOFF §14.**
+
 - [ ] T030 [P] [US3] Contract test: `open_booking_form` unavailable to the
-      model when no listing is selected (Principle II)
+      model when no listing is selected (Principle II). **Phase C.**
+      Must also pin the corrected gate: `submit_booking` is **not**
+      model-callable (decision 2026-08-09), so it must be absent from
+      `TOOLS_BY_PHASE[FORM_FILLING]` — a name in that table that nothing
+      binds is exactly the hole M2.5 left with `select_listing`.
 - [ ] T031 [P] [US3] Integration test: incomplete submission rejected
-      server-side without data loss in the iframe
+      server-side without data loss in the iframe. **Phase C.**
+      Non-vacuity: assert the already-entered values **survived** the
+      rejection round trip, not merely that errors came back.
 
 ### Implementation for User Story 3
 
-- [ ] T032 [US3] `mcp-apps-ui/booking-form/`: Vite + `@modelcontextprotocol/ext-apps`
-      form bundle, pre-fill support
-- [ ] T033 [US3] `mcp-services/booking/`: `open_booking_form` (ui://
-      resource) + `submit_booking` tools, server-side schema validation
+- [x] T032 [US3] `mcp-apps-ui/booking-form/`: Vite + `@modelcontextprotocol/ext-apps`
+      form bundle, pre-fill support. **DONE (M4a Phase B, 2026-08-09).**
+      Builds to ONE self-contained HTML file (277,722 bytes) installed and
+      committed at `mcp-services/booking/static/form.html` — the same
+      pattern as `data/listings.json`, so the Python image needs no Node
+      stage.
+
+      **Self-contained is a hard constraint, not an optimisation**: the host
+      renders this with `sandbox="allow-scripts"` and *without*
+      `allow-same-origin`, so the document has an opaque origin and cannot
+      fetch a sibling script or stylesheet. `scripts/install-bundle.mjs`
+      fails the build on any external asset reference, and also if the
+      bundle lacks the `"ui/initialize"` string — that handshake is what
+      separates an MCP App from an iframe, and therefore whether hard
+      requirement #3 is met at all.
+
+      Uses the official `App` class rather than a hand-rolled postMessage
+      handshake: a protocol implemented from prose is precisely the
+      "looks right, never ran" failure mode §3 catalogues.
+
+      Findings: `vite-plugin-singlefile`'s latest is **2.3.3** (`^2.4.0`
+      does not exist and `npm install` failed outright); money is formatted
+      with plain commas and **not** `toLocaleString`, which emits U+202F in
+      several locales — the exact character that made a Phase F test read
+      `$25 000` as `25`; and the form set `data-theme` from `hostContext`
+      with **nothing styling it**, dead code found only by opening it in a
+      browser.
+
+      ⚠️ **Nothing detects that the committed bundle is stale.** Demonstrated:
+      a marker appended to `src/main.ts` left all 83 tests green and never
+      reached the shipped file. Rebuild after any source edit
+      (HANDOFF §14 finding 7).
+- [x] T033 [US3] `mcp-services/booking/`: `open_booking_form` (ui://
+      resource) + `submit_booking` tools, server-side schema validation.
+      **Server half DONE (M4a Phase A, 2026-08-09)**; binding it to the
+      agent is Phase C.
+
+      Mounted at `/booking/mcp` by the new `mcp-services/app.py`, alongside
+      marketplace which **keeps `/mcp` and `/health` unchanged** — so
+      `MCP_MARKETPLACE_URL`, the compose healthcheck and all 39 pre-existing
+      tests needed no change. Dockerfile CMD is now `app:app`.
+
+      What makes it an MCP App, verified against `ext-apps` 1.7.5 by reading
+      its wire types and then by running a real MCP client against a live
+      uvicorn: tool `_meta` carries `"ui/resourceUri"`, the resource's MIME
+      type is `text/html;profile=mcp-app`, and the resource's `_meta.ui.csp`
+      declares an empty `connectDomains`/`resourceDomains` (US3 AS1's
+      deny-by-default). **CSP belongs on the resource, not the tool** —
+      ext-apps types the tool's `csp` field as `never` to stop people
+      putting it there.
+
+      **Two traps found by running it, both invisible to import-level tests:**
+      (a) Starlette does **not** run a mounted app's lifespan, and FastMCP's
+      streamable-HTTP session manager starts in one — mount both and forget
+      this and the server accepts connections then hangs on the first MCP
+      request. (b) A FastMCP instance's session manager is **single-use per
+      process**; the first version of `test_booking_server.py` entered the
+      production marketplace app's lifespan and broke a previously-passing
+      test in another module. `app.py` exposes `compose()` so the mount is
+      tested on throwaway servers.
+
+      🔴 **Phase C must NOT bind these tools to the model as written**
+      (HANDOFF §14 findings 1–2). `open_booking_form`'s schema requires the
+      full `listing` object, so a model calling it retypes every price and
+      year — Principle I violated by construction. Wrap both in local
+      `@tool`s with `InjectedState` (the `select_listing` pattern), and drop
+      `submit_booking` from the model-facing gate entirely.
 - [ ] T034 [US3] `frontend/src/mcp-app-host/`: Host implementation —
-      iframe sandbox creation, deny-by-default CSP, postMessage bridge
-      (adapted from `ext-apps/examples/basic-host`)
-- [ ] T035 [US3] `agent-backend/agent/graph.py`: FORM_FILLING phase node,
-      AWAITING_PAYMENT transition on valid submission
+      iframe sandbox creation, deny-by-default CSP, postMessage bridge.
+      **Phase D.** Note the `ext-apps/examples/basic-host` reference in the
+      original wording is **GitHub-only — it is not in the npm package**;
+      `AppBridge` is the real supported API. `AppBridge` accepts a **null**
+      MCP client and `oncalltool` is a **public setter**, so the host
+      intercepts the App's `tools/call` and tunnels it over the existing
+      WebSocket — no MCP client in the browser. Verified by reading the
+      1.7.5 bundle. The iframe renders **in the chat column**.
+- [ ] T035 [US3] FORM_FILLING wiring, AWAITING_PAYMENT transition on valid
+      submission. **Phase C.** `SessionState.submit_booking()` is the
+      **fourth** phase transition and belongs beside the existing three, so
+      every transition stays one code path in one module (Principle II).
+      Guard duplicate submits. Note the original wording put this in
+      `agent/graph.py`; the precedent it should actually follow is
+      `api/main.py::_run_research_turn` (code-driven kickoff) plus
+      `state.py` (the transition itself).
 
 **Checkpoint**: User can select a listing and complete a booking form
-without leaving the chat.
+without leaving the chat. **Not reached yet** — Phases A+B built the server
+and the form; nothing opens it in the chat until Phases C and D land.
 
 ---
 

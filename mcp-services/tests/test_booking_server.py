@@ -18,6 +18,7 @@ Two things are pinned here that no other test can see:
 from __future__ import annotations
 
 import asyncio
+import re
 
 import pytest
 from starlette.testclient import TestClient
@@ -25,7 +26,8 @@ from starlette.testclient import TestClient
 from app import app as composed_app
 from app import compose
 from booking import store
-from booking.server import (
+from booking.server import (  # noqa: E501
+    FORM_HTML_PATH,
     FORM_MIME_TYPE,
     FORM_RESOURCE_URI,
     LISTING_DISPLAY_FIELDS,
@@ -166,6 +168,78 @@ def test_payment_like_input_never_survives_submission():
     assert set(out["booking"]["submitted_form_fields"]) <= set(store.FIELDS)
     assert "4111111111111111" not in str(out)
     assert "123" not in str(out["booking"]["submitted_form_fields"])
+
+
+# --- the committed ui:// bundle (T032) -----------------------------------
+#
+# form.html is a build artifact that is checked in, like data/listings.json,
+# so the Python image needs no Node stage. Checked-in build output goes
+# stale silently, so it gets the same treatment listings.json gets: guards
+# that fail loudly rather than a comment asking people to remember.
+
+
+def test_the_form_bundle_is_committed_and_served():
+    assert FORM_HTML_PATH.exists(), (
+        "mcp-services/booking/static/form.html is missing. Build it with "
+        "`npm run build` in mcp-apps-ui/booking-form/."
+    )
+    html = asyncio.run(mcp.read_resource(FORM_RESOURCE_URI))
+    body = list(html)[0].content
+    assert body.strip().startswith("<!doctype html")
+
+
+def test_the_bundle_is_self_contained():
+    """The constraint that dictates the whole build config.
+
+    The host sandboxes this document with `allow-scripts` and *without*
+    `allow-same-origin`, so it has an opaque origin and cannot fetch a
+    sibling script, stylesheet or font. An external reference here renders
+    as a blank iframe at demo time with nothing failing anywhere else.
+    """
+    html = FORM_HTML_PATH.read_text()
+    external = re.findall(r'<(?:script|link)[^>]+(?:src|href)=["\'](?!data:)([^"\']+)', html)
+    assert external == [], f"bundle references external assets: {external}"
+
+
+def test_the_bundle_speaks_the_mcp_apps_protocol():
+    """What separates an MCP App from an iframe, and therefore whether
+    hackathon requirement #3 is actually met.
+    """
+    html = FORM_HTML_PATH.read_text()
+    assert "ui/initialize" in html
+    assert "submit_booking" in html
+
+
+def test_the_bundle_declares_a_deny_by_default_csp():
+    """spec.md US3 AS1, asserted inside the document as well as on the
+    resource metadata -- a host that ignores resource `_meta` still gets a
+    locked-down document.
+    """
+    html = FORM_HTML_PATH.read_text()
+    assert "Content-Security-Policy" in html
+    assert "default-src 'none'" in html
+
+
+def test_the_bundle_has_no_payment_input():
+    """Principle III: booking collects contact details, never payment."""
+    html = FORM_HTML_PATH.read_text().lower()
+    for banned in ("card_number", "cardnumber", "cvv", "cvc", 'type="creditcard"'):
+        assert banned not in html
+
+
+def test_the_resource_declares_an_empty_csp_allowlist():
+    from booking.server import FORM_RESOURCE_META
+
+    csp = FORM_RESOURCE_META["ui"]["csp"]
+    # Stated-and-empty, not omitted: an explicit, auditable "talks to
+    # nobody, loads nothing" rather than "host default".
+    assert csp["connectDomains"] == [] and csp["resourceDomains"] == []
+    assert FORM_RESOURCE_META["ui"]["permissions"] == {}
+
+
+def test_booking_health_reports_the_bundle_is_present():
+    response = _client(app).get("/health")
+    assert response.json()["form_bundle_present"] is True
 
 
 def test_booking_health_route_answers():

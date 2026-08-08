@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!--
+      Defence in depth. The host already sandboxes this document (an iframe
+      with allow-scripts but NOT allow-same-origin, so the origin is opaque)
+      and the ui:// resource declares an empty connectDomains/resourceDomains
+      CSP. This meta tag makes the same promise from inside the document, so
+      the form is deny-by-default even if it is ever rendered by a host that
+      ignores resource metadata -- spec.md US3 AS1.
+
+      'unsafe-inline' on script/style is unavoidable and safe here: the whole
+      point of a single-file MCP App is that its script and styles ARE
+      inline, and default-src 'none' means they can reach nothing.
+    -->
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; form-action 'none'; base-uri 'none'"
+    />
+    <title>Book this car</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

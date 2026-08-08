@@ -1,0 +1,21 @@
+{
+  "name": "booking-form-mcp-app",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "description": "T032 — the in-chat booking form, built as an MCP App (hackathon hard requirement #3). Builds to ONE self-contained HTML file, because the host renders it in an iframe sandboxed without allow-same-origin: the document has an opaque origin and cannot fetch a sibling script, stylesheet or font.",
+  "scripts": {
+    "build": "vite build && node scripts/install-bundle.mjs",
+    "dev": "vite"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/ext-apps": "^1.7.5"
+  },
+  "devDependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "typescript": "^5.9.3",
+    "vite": "^8.0.0",
+    "vite-plugin-singlefile": "^2.3.3",
+    "zod": "^3.25.76"
+  }
+}

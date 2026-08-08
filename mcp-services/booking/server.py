@@ -130,7 +130,23 @@ def submit_booking(listing_id: str, fields: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-@mcp.resource(FORM_RESOURCE_URI, mime_type=FORM_MIME_TYPE)
+# spec.md US3 AS1 requires a deny-by-default CSP. In MCP Apps that is
+# declared on the **resource**, not the tool (the tool's own `csp` field is
+# typed `never` precisely to stop people putting it there), under the `ui`
+# namespace in `_meta`. Empty lists are not the same as omitting the keys:
+# omitted means "host default", stated-and-empty is an explicit, auditable
+# "this form talks to nobody and loads nothing". The form is entirely
+# self-contained, so both are genuinely empty, and no sandbox permission
+# (camera/microphone/geolocation/clipboard) is requested at all.
+FORM_RESOURCE_META = {
+    "ui": {
+        "csp": {"connectDomains": [], "resourceDomains": []},
+        "permissions": {},
+    }
+}
+
+
+@mcp.resource(FORM_RESOURCE_URI, mime_type=FORM_MIME_TYPE, meta=FORM_RESOURCE_META)
 def booking_form_ui() -> str:
     """The booking form's UI, as one self-contained HTML document.
 

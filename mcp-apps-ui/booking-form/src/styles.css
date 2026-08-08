@@ -1,0 +1,212 @@
+/* Themed through the MCP Apps host style variables (McpUiStyleVariableKey),
+   which the host sends in `hostContext.styles` at ui/initialize and updates
+   via ui/notifications/host-context-changed. Every value below falls back to
+   something sensible, so the form is legible in a host that sends no styles
+   at all -- which is the A2UI --a2ui-* lesson (HANDOFF §8.21e) applied to
+   the other surface: never depend on a variable you did not define a
+   fallback for. */
+
+:root {
+  --form-bg: var(--color-background-primary, #ffffff);
+  --form-bg-alt: var(--color-background-secondary, #f6f7f9);
+  --form-text: var(--color-text-primary, #16191d);
+  --form-text-dim: var(--color-text-secondary, #5b6472);
+  --form-border: var(--color-border-primary, #d8dde5);
+  --form-danger: var(--color-text-danger, #b3261e);
+  --form-danger-bg: var(--color-background-danger, #fdecea);
+  --form-success: var(--color-text-success, #1b5e20);
+  --form-success-bg: var(--color-background-success, #e8f5e9);
+  --form-accent: var(--color-background-inverse, #16191d);
+  --form-accent-text: var(--color-text-inverse, #ffffff);
+  --form-radius: var(--border-radius-md, 10px);
+  --form-font: var(--font-sans, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif);
+}
+
+/* A dark host that sends no style variables would otherwise get the light
+   fallbacks above. They are at least self-consistent (dark text on a white
+   card, so always legible), but a white card punched into a dark
+   conversation looks broken. `theme` arrives on hostContext at
+   ui/initialize and again on host-context-changed, and main.ts stamps it
+   here. Host-sent --color-* variables still win: they are set as inline
+   styles on the same element, which beats a stylesheet rule. */
+:root[data-theme="dark"] {
+  --form-bg: var(--color-background-primary, #1c1f24);
+  --form-bg-alt: var(--color-background-secondary, #24282f);
+  --form-text: var(--color-text-primary, #e8eaed);
+  --form-text-dim: var(--color-text-secondary, #a3adba);
+  --form-border: var(--color-border-primary, #39404a);
+  --form-danger: var(--color-text-danger, #f2b8b5);
+  --form-danger-bg: var(--color-background-danger, #3b1f1d);
+  --form-success: var(--color-text-success, #a5d6a7);
+  --form-success-bg: var(--color-background-success, #1d3320);
+  --form-accent: var(--color-background-inverse, #e8eaed);
+  --form-accent-text: var(--color-text-inverse, #16191d);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  background: transparent;
+}
+
+body {
+  font-family: var(--form-font);
+  color: var(--form-text);
+  font-size: 14px;
+  line-height: 1.45;
+}
+
+.card {
+  background: var(--form-bg);
+  border: 1px solid var(--form-border);
+  border-radius: var(--form-radius);
+  padding: 16px;
+}
+
+.title {
+  margin: 0 0 2px;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.subtitle {
+  margin: 0 0 14px;
+  color: var(--form-text-dim);
+  font-size: 12.5px;
+}
+
+/* The selected car, rendered from the verbatim tool record. */
+.vehicle {
+  background: var(--form-bg-alt);
+  border: 1px solid var(--form-border);
+  border-radius: var(--form-radius);
+  padding: 12px;
+  margin-bottom: 16px;
+}
+
+.vehicle-name {
+  font-weight: 600;
+  margin-bottom: 8px;
+}
+
+.vehicle-specs {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 8px 14px;
+}
+
+.spec-label {
+  color: var(--form-text-dim);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.spec-value {
+  font-variant-numeric: tabular-nums;
+}
+
+.fields {
+  display: grid;
+  gap: 12px;
+}
+
+.field label {
+  display: block;
+  margin-bottom: 4px;
+  font-size: 12.5px;
+  font-weight: 500;
+}
+
+.field .required {
+  color: var(--form-danger);
+  margin-left: 2px;
+}
+
+.field input,
+.field textarea {
+  width: 100%;
+  padding: 8px 10px;
+  font: inherit;
+  color: inherit;
+  background: var(--form-bg);
+  border: 1px solid var(--form-border);
+  border-radius: var(--border-radius-sm, 7px);
+}
+
+.field input:focus,
+.field textarea:focus {
+  outline: 2px solid var(--color-ring-primary, #3b6ef2);
+  outline-offset: 1px;
+}
+
+.field[data-invalid="true"] input,
+.field[data-invalid="true"] textarea {
+  border-color: var(--form-danger);
+}
+
+.field-error {
+  margin-top: 4px;
+  color: var(--form-danger);
+  font-size: 12px;
+}
+
+.field textarea {
+  resize: vertical;
+  min-height: 58px;
+}
+
+.summary {
+  margin-bottom: 12px;
+  padding: 9px 11px;
+  border-radius: var(--border-radius-sm, 7px);
+  background: var(--form-danger-bg);
+  color: var(--form-danger);
+  font-size: 12.5px;
+}
+
+.actions {
+  margin-top: 16px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+button {
+  font: inherit;
+  font-weight: 600;
+  padding: 9px 16px;
+  border: none;
+  border-radius: var(--border-radius-sm, 7px);
+  background: var(--form-accent);
+  color: var(--form-accent-text);
+  cursor: pointer;
+}
+
+button:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.note {
+  color: var(--form-text-dim);
+  font-size: 12px;
+}
+
+.confirmed {
+  background: var(--form-success-bg);
+  border: 1px solid var(--form-success);
+  border-radius: var(--form-radius);
+  padding: 16px;
+  color: var(--form-success);
+}
+
+.confirmed .ref {
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-weight: 600;
+}

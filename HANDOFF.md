@@ -115,8 +115,14 @@ M6   ⬜ Hardening, E2E tests, README finalization, deck, demo video
 of quota, the live tests **fail** rather than skip. Check the provider
 account before assuming a code bug.
 
-**Git log** (main, clean, synced with origin):
+**Git log** (main, clean, synced with origin). Lists the substantive commits;
+a trailing `docs:` commit that stamps this section cannot list its own sha,
+so this block may lag HEAD by one or two docs-only commits — check
+`git log --oneline -5` rather than trusting it:
 ```
+cf90320   docs: rewrite HANDOFF for a Phase D handoff  <- or later docs commits
+82d4b6b  docs: point HANDOFF at Phase D and correct the Phase C references
+701acda  docs: stamp the Phase C commit sha into HANDOFF's git log
 dd7ab4a  M3 Phase C (T024, T025): MCP wiring, code-driven search, ranking
 8e44793  M3 Phase C pre-flight audit: fix test collection, correct stale docs
 2fa9fcf  docs: bring HANDOFF/README/plan/tasks up to M3 Phase B state

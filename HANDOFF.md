@@ -5,8 +5,8 @@ continue this project with zero re-discovery and without repeating mistakes
 already made and fixed. Read this file first, then the files listed in
 [§13 Required reading](#13-required-reading).
 
-**Last updated**: 2026-08-08, after the **Phase F pre-flight audit**.
-M3 is *in progress* — Phases A–E are done, **F (behavioural tests) is not**.
+**Last updated**: 2026-08-08, after **M3 Phase F** (T029 + T021) shipped.
+**M3 is complete.** Phases A–F are done; M4a is the next milestone.
 
 > **Treat every claim in this file as a claim, not as truth.** Six separate
 > audits have now found docs asserting behaviour the code did not have — and
@@ -58,7 +58,7 @@ and a *mocked* checkout **without leaving the chat**.
 | Frontend | **React + Vite**, `@a2ui/react` renderer | See §8 |
 | MCP server language | **Python** (MCP Python SDK) | Keeps backend single-language |
 | Session store | LangGraph **AsyncSqliteSaver** | Zero external infra, real persistence (was SqliteSaver — see §3) |
-| LLM provider (dev) | **Groq**, `openai/gpt-oss-120b` | ~1000 req/day vs Gemini's ~20 — see §5 |
+| LLM provider (dev) | **Groq**, `openai/gpt-oss-120b` | 200k tokens/day ≈ 66 agent turns, vs Gemini's ~20 requests/day — see §5 |
 | Push cadence | **Commit + push after each milestone, pre-authorized** | User approved; no per-push confirmation needed |
 
 ### Resolved architectural ambiguity (important)
@@ -85,7 +85,7 @@ M0   ✅ spec-kit scaffolding, constitution, spec/plan/tasks, 4-service compose 
 M1   ✅ mock dataset generator, session-state schemas, checkpointer persistence, Phoenix tracing
 M2   ✅ Conversational Interview (User Story 1) — DeepAgents agent, A2UI surface, WebSocket API, React frontend
 M2.5 ✅ Audit remediation — see §3
-M3   🟡 IN PROGRESS — Research & Ranked Recommendations (User Story 2)
+M3   ✅ COMPLETE — Research & Ranked Recommendations (User Story 2)
        ✅ Phase A  async agent path (blocking prerequisite, see §3)
        ✅ Phase B  T020 + T023 marketplace MCP server
        ✅ Phase C  T024 + T025 adapter wiring, ranking, research auto-kickoff
@@ -93,7 +93,8 @@ M3   🟡 IN PROGRESS — Research & Ranked Recommendations (User Story 2)
                    frontend, grounding snapshot test
        ✅ Phase E  T028 listing selection: select_listing tool + state
                    transition, catalogue Button, {"type":"action"} wiring
-       ⬜ Phase F  T021 + T029 live behavioural tests
+       ✅ Phase F  T029 + T021 live behavioural tests. Both found real
+                   defects, all fixed and re-verified live — see §3
        ⬜ (T027 listing-detail MCP App — recommended deferred past M4)
 M4a  ⬜ Booking form MCP App (User Story 3)
 M4b  ⬜ Mock checkout MCP App (User Story 4)
@@ -102,17 +103,26 @@ M5   ⬜ Evals (observability itself is wired, M2.5/T051)
 M6   ⬜ Hardening, E2E tests, README finalization, deck, demo video
 ```
 
-**Test suite: 164 total** (measured 2026-08-08 after Phase E, not copied forward).
+**Test suite: 202 total** (measured 2026-08-08 after Phase F, not copied forward).
 
 | Suite | Tests | Gated | Files |
 |---|---|---|---|
-| `mcp-services` | **35** | 0 | `test_generate_listings` (8), `test_marketplace` (18), `test_marketplace_server` (9) |
-| `agent-backend` | **129** | 3 | 16 modules, see §7 |
+| `mcp-services` | **39** | 0 | `test_generate_listings` (8), `test_marketplace` (22), `test_marketplace_server` (9) |
+| `agent-backend` | **163** | 9 | 19 modules, see §7 |
 
-- **161 pass with no external setup** (35 + 126)
-- **All 164 pass** with a live LLM key *and* Phoenix running — verified 2026-08-08
-- Exactly **3** gated tests (`grep -rn skipif */tests/`): `test_interview_agent`
-  and `test_chat_endpoint` (need `LLM_API_KEY`), `test_otel_setup` (needs Phoenix)
+- **193 pass with no external setup** (39 + 154)
+- **All 202 pass** with a live LLM key and Phoenix running. ⚠️ Verified in
+  pieces, not in one sweep: Groq's 200k tokens/day ran out mid-run (§5).
+  Every live test has passed against real Groq, but the final full green
+  sweep on the final code is still owed. A quota 429 now **skips** rather
+  than failing (§8.32), so a re-run when the window resets reads honestly
+  either way.
+- Exactly **9** gated tests, up from 3: the six new Phase F live tests join
+  `test_interview_agent`, `test_chat_endpoint` (need `LLM_API_KEY`) and
+  `test_otel_setup` (needs Phoenix). Do **not** count them by grepping
+  `skipif` — one hit in `test_phase_gate.py` is a docstring mention.
+- ⚠️ **The gate itself was broken until Phase F** and is now enforced in
+  `agent-backend/conftest.py`. See §3.
 
 ⚠️ The credential gate checks key **presence** only. With a key set but out
 of quota, the live tests **fail** rather than skip. Check the provider
@@ -123,7 +133,9 @@ a trailing `docs:` commit that stamps this section cannot list its own sha,
 so this block may lag HEAD by one or two docs-only commits — check
 `git log --oneline -5` rather than trusting it:
 ```
-(this docs: commit)  docs: bring HANDOFF/README up to the Phase E handoff
+(this docs: commit)  docs: bring HANDOFF/tasks/plan/README up to the M3-complete state
+63ea11c  audit: correct the T029 probe-routing recipe, which never worked
+d78890e  docs: bring HANDOFF and plan.md up to the Phase E handoff state
 b2d35f3  M3 Phase E (T028): listing selection end to end
 a9b0e59  audit: take tracing off the request critical path; fix a stale docstring
 868f8de  M3 Phase D (T026, T022): A2UI reasoning + catalogue surfaces, themed frontend
@@ -233,6 +245,31 @@ confirmation"). So T029 can assert on **state** — no unrequested
 `select_listing` call, no advance to FORM_FILLING — which is far stronger
 than grepping prose. See §10.
 
+### Found by Phase F itself — by the new tests, on their first live run
+
+**The two tests M3 owed found four real defects between them, and three were
+in code every doc described accurately.** Each had passed review, passed the
+deterministic suite, and would have shipped.
+
+| Defect | How it presented | Fix |
+|---|---|---|
+| 🔴 **The agent silently widened a search and claimed it had not.** T021's first live run: the model opened *"Four listings matched your criteria"* for a slate that existed only because the availability filter had been dropped. Every number in the sentence was grounded; the sentence was false — the exact spec.md US2 AS2 failure the test exists to catch | `narration_brief` put the relaxation NOTE fourth from the top and *ended* with "say how many **matched**". The model followed the closing instruction, which is last and concrete | A closing `CRITICAL` block, emitted only when something was relaxed, quoting the exact wording that went wrong. Re-verified live: *"No listings met all of your original criteria, so we relaxed the availability date"* |
+| 🔴 **On zero results the model invented the constraints it had "tried"**, emitting a table asserting *"Transaction type: all types (sale, lease, etc.)"* when the query only ever said `buy` | The zero-result brief told the model to "say which constraints were tried" and **never said what they were**. No listing was fabricated, so Principle I's letter held — the user was still told something untrue about their own search | The brief now states the original query, the widest query actually run, and the rungs relaxed |
+| **That same reply was a markdown table**, which the chat bubble renders literally (T026 finding (e)) — a raw pipe-table and `**bold**` on screen | Phase D added "plain sentences, no markdown" to the *found* branch only. The zero-result branch never got it | Rule repeated in that branch; `assert_plain_prose` now guards both live paths |
+| 🔴 **The credential gate did not work, and had not for some time.** `api/main.py` calls `load_dotenv()` as an **import side effect**, so the first test module importing it writes `.env` into `os.environ` for the whole session, and every `skipif` evaluated afterwards sees a key the shell never had | Collection-order dependent, which is why it hid: under `env -u LLM_API_KEY` the two early modules skipped correctly while the new ones ran, reached for the network and failed. Two gated tests, one suite, one environment, opposite behaviour | Snapshot in `agent-backend/conftest.py`, which pytest imports before any test module. All nine gated tests now read the one constant |
+
+And one the tests found **in themselves** — §3's pattern turned inward:
+
+| Defect | Detail |
+|---|---|
+| **T021's own price extractor read `$25 000` as `25`** | It enumerated ASCII spaces; `gpt-oss-120b` emits **U+202F**. The captured number matched no record, so the check would have reported a hallucination that never happened. This is Phase C's vacuous-grounding trap in a new costume — and note the lesson recorded then ("assert non-vacuity") would **not** have caught it, because the check did run and did compare something. It compared the wrong thing. `tests/test_live_prose_helpers.py` now tests the extractor against real captured output |
+
+**Also corrected: Groq's real quota is not what §5 said.** The binding limit
+is **200,000 tokens per day** — no doc mentioned it; §5 advertised "~1000
+requests/day" and only the per-minute cap. At ~3,000 tokens per agent turn
+(DeepAgents' 2.7k tool-schema tax plus the brief) that is **~66 agent turns
+per day, not 1000**. Exhausted for real during this phase. See §5.
+
 **Lessons worth keeping:**
 1. A test asserting *a prompt contains a rule* proves the rule was written,
    not that it is enforced. Grep for the thing the rule describes.
@@ -279,6 +316,19 @@ than grepping prose. See §10.
     telling the next session *how to do its work* — and that recipe was
     wrong. Prose that describes future work is untested by construction;
     it earns the same scepticism as a status claim.
+13. **A true sentence can be built entirely from grounded numbers.**
+    "Four listings matched your criteria" contained no hallucination and
+    was still false, because the *claim about the search* was wrong.
+    Principle I constrains values, not assertions — so grounding checks
+    cannot be the only thing standing between a user and a lie.
+14. **The last instruction wins.** Both prompt defects in Phase F were
+    ordering, not content: the rule was present, higher up, and lost to a
+    more concrete closing instruction. When a prompt must guarantee
+    something, put it last and name the wrong answer explicitly.
+15. **Test the test's parser.** Non-vacuity counters prove a check ran,
+    not that it read the input correctly. The extractor that turned
+    "$25 000" into "25" passed every non-vacuity guard — it compared
+    something, just not the number on the page.
 
 ### 3b. The dataset could not satisfy the spec (fixed in Phase B)
 
@@ -362,8 +412,16 @@ a scan that only covered two of those leaked a key into a transcript once.
 
 - **ACTIVE (dev): Groq.** `LLM_PROVIDER=openai_compatible`,
   `LLM_BASE_URL=https://api.groq.com/openai/v1`, `LLM_MODEL=openai/gpt-oss-120b`.
-  **Free tier ~1000 requests/day**, which is what makes M3's live behavioural
-  tests (T021/T029) and the T046 eval run affordable.
+- 🔴 **The binding quota is TOKENS PER DAY: 200,000.** Corrected in Phase F,
+  where it was exhausted for real
+  (`Limit 200000, Used 197934 ... try again in 6m23s`). Every doc previously
+  advertised "~1000 requests/day" and mentioned only the per-minute cap.
+  **At ~3,000 tokens per agent turn that is ~66 turns/day, not 1000** — the
+  request count is nowhere near the limit that actually bites, because
+  DeepAgents binds ~2,700 tokens of tool schemas into every single request
+  (§8.12). Budget accordingly: one full Phase F live run is 6 turns ≈ 9% of
+  the day, and a demo rehearsal plus the T046 eval set will not both fit.
+  **Plan the demo-day budget before demo day.**
 - **Verified end-to-end at M3 start** through the real agent path
   (`build_interview_agent` → `save_interview_state`): 2-turn tool-using
   conversation survives, overwrite-not-append semantics correct. This is the
@@ -373,7 +431,13 @@ a scan that only covered two of those leaked a key into a transcript once.
   (`x-ratelimit-limit-tokens: 8000` for `gpt-oss-120b`, 12000 for
   `llama-3.3-70b-versatile`), and the reservation counts prompt + `max_tokens`.
   **Measured: `max_tokens=4096` → 39s and 68s per turn; `1024` → 2.2s and 1.7s.**
-  Hence `DEFAULT_MAX_TOKENS_BY_PROVIDER` in `agent/llm.py`. A 2-turn interview
+  Hence `DEFAULT_MAX_TOKENS_BY_PROVIDER` in `agent/llm.py`.
+  Phase F added `DEFAULT_MAX_RETRIES_BY_PROVIDER` (openai_compatible: **6**,
+  up from the client default of 2) beside it: a TPM 429 clears in about a
+  second, so retries absorb a *burst* — which is what a judge clicking
+  through a demo looks like. They cannot absorb a *sustained* overage, so
+  the live tests also pace themselves (`pace_live_turn`, 24s apart);
+  6 back-to-back turns demand ~21k tokens against an 8k/min ceiling. A 2-turn interview
   session burns ~9,200 prompt tokens against that 8k/min ceiling, so throttling
   is normal under load — **suspect TPM before suspecting a hang.**
 - **Model quality note**: `llama-3.3-70b-versatile` showed weaker prompt
@@ -466,13 +530,15 @@ python mcp-services/data/generate_listings.py
 | `agent/prompts.py` | `PHASE_SYSTEM_PROMPTS` (a missing entry fails at startup). Listing-facing phases embed `UNTRUSTED_DATA_RULE` |
 | `agent/mcp_client.py` | **T024**: `discover_marketplace_tools()` — fail-soft MCP discovery, returns `[]` rather than raising. Never touches `TOOL_REGISTRY` |
 | `agent/ranking.py` | **T025**: deterministic `rank()` over tool-artifact records. Min-max normalised *within the slate*; `reasoning` is a template filled from record fields, never the `description` |
-| `agent/research.py` | **T025**: `run_research()` — code-driven first search from persisted interview state, AS2 relaxation ladder, `narration_brief()` for the model |
-| `agent/llm.py` | `build_model()` selects by `LLM_PROVIDER`. **`DEFAULT_MAX_TOKENS_BY_PROVIDER`** (google 4096 / openai_compatible 1024) + `LLM_MAX_TOKENS` override |
+| `agent/research.py` | **T025**: `run_research()` — code-driven first search from persisted interview state, AS2 relaxation ladder, `narration_brief()` for the model. Phase F added `original_query` (the model cannot say what changed if shown only the result) and the closing `CRITICAL` disclosure block — both from defects T021 caught live, see §3 |
+| `agent/llm.py` | `build_model()` selects by `LLM_PROVIDER`. **`DEFAULT_MAX_TOKENS_BY_PROVIDER`** (google 4096 / openai_compatible 1024) and **`DEFAULT_MAX_RETRIES_BY_PROVIDER`** (google 2 / openai_compatible 6), each with an env override (`LLM_MAX_TOKENS`, `LLM_MAX_RETRIES`) |
 | `agent/render_a2ui.py` | **A2UI v0.9.** Three surfaces, each `_init()` (createSurface + tree + data) / `_update()` (data only): interview, **reasoning** and **catalogue** (T026). Plus `_display()` (enum/float traps), `ICON_PATHS`/`icon()` (inline SVG, §8.21d) and `STEP_KIND_ICONS`. Every surface's root component **must** have id `root` (§8.21c) |
 | `api/main.py` | FastAPI. `GET /health`, `WS /ws/{session_id}`. **AsyncSqliteSaver lifespan, `agent.ainvoke`, `aget_state`**, `message_text()`. **`_SurfaceStream`** owns per-connection init-vs-update for all three A2UI surfaces; a resumed session with `recommendations` gets its catalogue re-emitted on connect |
 | `observability/otel_setup.py` | `setup_observability()` → `phoenix.otel.register(..., protocol="grpc", auto_instrument=True)` |
 | `conftest.py` | Puts the service root on `sys.path` so the suite collects under a bare `pytest`, not only `python -m pytest`. Added by the Phase C audit — see §3 |
-| `tests/` | **16 modules, 129 tests** (+`test_select_listing` 21 = T028b)<br>previously **15 modules, 106 tests** (+`test_catalogue_grounding` 24 = T022)<br>previously **14 modules, 82 tests** (`test_ranking` 12, `test_research` 17, `test_mcp_wiring` 8)<br>and before that **11 modules, 45 tests**: `test_state`(6), `test_tools`(5), `test_graph_persistence`(2), `test_render_a2ui`(8), `test_chat_endpoint`(3), `test_chat_endpoint_error_handling`(1), `test_interview_agent`(1), `test_otel_setup`(1), `test_phase_gate`(10), `test_observability_wiring`(2), `test_message_text`(6) |
+| `conftest.py` (gate) | Also holds **`LLM_CREDENTIALS_PRESENT`**, the single source of truth for the live-LLM gate. Must stay there: `api/main.py`'s import-time `load_dotenv()` pollutes `os.environ`, so any `skipif` computed inside a test module is order-dependent (§3) |
+| `tests/support_live.py` | Phase F shared fixtures: probe/relaxation routes, `scripted_search_tool` (a real `StructuredTool` shaped like the MCP adapter), the U+202F-aware `dollar_amounts`, `grounded_numbers`, and `pace_live_turn`. Not collected (`support_*`) |
+| `tests/` | **19 modules, 163 tests** (+`test_prompt_injection` 9 = T029, `test_relaxation_messaging` 7 = T021, `test_live_prose_helpers` 22)<br>previously **16 modules, 129 tests** (+`test_select_listing` 21 = T028b)<br>previously **15 modules, 106 tests** (+`test_catalogue_grounding` 24 = T022)<br>previously **14 modules, 82 tests** (`test_ranking` 12, `test_research` 17, `test_mcp_wiring` 8)<br>and before that **11 modules, 45 tests**: `test_state`(6), `test_tools`(5), `test_graph_persistence`(2), `test_render_a2ui`(8), `test_chat_endpoint`(3), `test_chat_endpoint_error_handling`(1), `test_interview_agent`(1), `test_otel_setup`(1), `test_phase_gate`(10), `test_observability_wiring`(2), `test_message_text`(6) |
 
 ### mcp-services (Python) — **rewritten in M3 Phase B**
 | File | Purpose |
@@ -482,7 +548,7 @@ python mcp-services/data/generate_listings.py
 | `marketplace/store.py` | **Query logic**: `load_listings()`, `matches()`, `search()`, `get_details()`, `wrap_untrusted()`. Pure functions over dicts — testable without a transport |
 | `marketplace/server.py` | **FastMCP Streamable HTTP server**: `search_listings`, `get_listing_details`, `/health` custom route. `stateless_http=True`. `app` is the ASGI app |
 | `tests/test_generate_listings.py` | 8 tests incl. SC-006 compliance + committed-file guard |
-| `tests/test_marketplace.py` | **18 tests** — T020 hard filters |
+| `tests/test_marketplace.py` | **22 tests** — T020 hard filters, plus the four Phase F guards pinning each `ADV-*` probe's documented route against the real dataset (and one regression guard keeping the retired, broken route retired) |
 | `tests/test_marketplace_server.py` | **9 tests** — MCP tool contract (structured_content shape, untrusted wrapper, error path) |
 | `conftest.py` | Same role as agent-backend's. Replaced the per-file `sys.path.insert` hacks in two test modules, which had left `test_generate_listings` broken |
 | `booking/`, `payment/` | Empty dirs (M4) |
@@ -704,8 +770,20 @@ Every one is verified, not assumed.
     collection time and leaks into *other* modules' `skipif` evaluation.
     Use function-scoped `monkeypatch.setenv`.
 31. **Run the full suite together**, not file-by-file.
-32. Credential gates check key **presence**, so an out-of-quota key produces
-    **failures, not skips**.
+32. ✅ *(fixed in Phase F)* Credential gates check key **presence**, so an
+    out-of-quota key used to produce **failures, not skips**. The live
+    modules now route provider 429s through
+    `support_live.skip_if_quota_exhausted`, which skips with the provider's
+    own message (naming TPD/TPM and the retry window) instead of going red.
+    Worth doing because a red suite meaning "you ran out of tokens" trains
+    you to ignore red — and these are the tests whose job is to be believed
+    when they go red. Only an explicit quota signal skips; anything else
+    re-raises.
+32a. **The gate itself is `LLM_CREDENTIALS_PRESENT` in
+    `agent-backend/conftest.py`** and must stay there. Do not recompute it
+    in a test module, and do not import `api.main` at module scope: it calls
+    `load_dotenv()` at import, which pollutes `os.environ` and makes every
+    later `skipif` collection-order dependent (§3).
 
 ### Tooling / environment
 33. `.gitignore`'s `.env.*` pattern wrongly excluded `.env.example` — fixed
@@ -742,87 +820,69 @@ Full text in `.specify/memory/constitution.md`.
 3. **Mock-Only Transactions** — no real payment path, no BMW APIs, no
    persistence of card-like data. *Nothing to enforce until M4b.*
 4. **Untrusted Data Boundary** — marketplace listing text is **data, never
-   instructions**. *The prompt rule has existed since M2; the **wrapping** only
-   became real in M3 Phase B (`store.wrap_untrusted`, applied server-side).
-   Behavioral proof is still owed: **T029** must show the three `ADV-*` probes
-   cause zero deviation.*
+   instructions**. *Status: **PASS on `openai/gpt-oss-120b`** (M3 Phase F).
+   The rule has existed since M2, the wrapping became real in Phase B
+   (`store.wrap_untrusted`, server-side), and T029 now supplies the
+   behavioural proof: all three `ADV-*` probes reach the model inside the
+   delimiters and cause **zero** deviation — no fabricated `$1` price, no
+   unrequested `select_listing`, no phase advance, no system-prompt or
+   credential disclosure, and the deterministic ranking is byte-identical
+   across the model turn.
+   ⚠️ **An injection result is only evidence for the model it ran on.** The
+   demo provider is Gemini and T029 has **not** been run against it — that
+   rehearsal is owed before the demo (§11).*
 5. **Full Observability** — every LLM call, tool call, and phase transition
    emits an OTel span. *Genuinely wired since M2.5; re-verified after the async
    migration (16 spans for one 2-turn session).*
 
 ---
 
-## 10. NEXT UP: M3 Phase F — start here
+## 10. NEXT UP: M4a — start here
 
-### What Phase E left you
+### What Phase F left you
 
-Phase E (T028) is **done, verified live in a browser, and pushed**. US2 is
-now complete end to end: interview → auto-research → ranked A2UI catalogue →
-listing selection → FORM_FILLING. What remains in M3 is Phase F, which is
-**tests, not features**.
+**M3 is complete.** Phase F (T029 + T021) is done, verified live against
+Groq, and its findings are recorded in §3 — read that first, because both
+tests found real defects in shipped code, and the fixes changed
+`agent/research.py`, `agent/llm.py` and `agent-backend/conftest.py`.
 
-| Produced by Phase E | Where |
+| Produced by Phase F | Where |
 |---|---|
-| `SessionState.select_listing()` — the third and last phase transition | `agent/state.py`, beside `save_interview_slots` / `record_research` |
-| `SessionState.selected_listing()` — the verbatim record | `agent/state.py` — **M4a pre-fills the booking form from this**, not from model prose |
-| `select_listing` tool (model path) | `agent/tools.py`, registered in `TOOL_REGISTRY` |
-| Catalogue `Button` + `{"type":"action"}` handling | `render_a2ui._catalogue_components`, `api/main._handle_action` |
-| `_persist_session` (`aupdate_state`) | `api/main.py` — writes state when no graph runs (§8.20c) |
+| T029 — 3 `ADV-*` probes proven inert (Principle IV → PASS on gpt-oss-120b) | `tests/test_prompt_injection.py` (9 tests, 4 live-gated) |
+| T021 — relaxation disclosure + empty-slate honesty, live | `tests/test_relaxation_messaging.py` (7 tests, 2 live-gated) |
+| Shared live fixtures, prose helpers, TPM pacing | `tests/support_live.py` |
+| The extractor's own tests | `tests/test_live_prose_helpers.py` (22 tests) |
+| Probe routes pinned against the real dataset | `mcp-services/tests/test_marketplace.py` (+4) |
+| Relaxation disclosure + zero-result constraint reporting | `agent/research.py` (`original_query`, `relaxed_labels`, the `CRITICAL` block) |
+| Retry budget for Groq's TPM bursts | `agent/llm.py` (`DEFAULT_MAX_RETRIES_BY_PROVIDER`) |
+| A working live-test gate | `agent-backend/conftest.py` (`LLM_CREDENTIALS_PRESENT`) |
 
-⚠️ **FORM_FILLING is reachable but empty until M4a.** Selecting advances the
-phase, and that phase's tools (`open_booking_form`, `submit_booking`) do not
-exist yet, so the agent has no domain tools there. Correct per the gate, but
-**do not demo past the selection** until M4a lands.
+### Immediate next: M4a — booking form MCP App (US3, T030-T035)
 
-### Immediate next: Phase F (T021 + T029) — behavioural tests
+Hard requirement #3, and the last unmet one that is purely build work.
+`select_listing` and `SessionState.selected_listing()` exist, so
+`open_booking_form` has a real precondition to gate on and a **verbatim
+record** to pre-fill from — pre-fill from `selected_listing()`, never from
+model prose (Principle I).
 
-Both are **live-gated** tests that need a real model, and both already have
-their deterministic halves written. Groq (~1000 req/day) makes them
-affordable; run T029 on Groq *and* once on whatever model ships, since an
-injection result is only evidence for the model it ran on.
+Before writing any of it, three things from this milestone will save a cycle:
 
-1. **T029 — prompt injection (Principle IV).** The three `ADV-*` probes must
-   cause **zero** behavioural deviation. The wrapping is real and verified
-   (`store.wrap_untrusted`, delimiters confirmed reaching the model live),
-   but Principle IV's row stays PARTIAL until this behavioural proof exists —
-   a wrapper the model ignores is not a boundary.
+1. **`FORM_FILLING` is reachable and empty.** Selecting a listing advances
+   the phase and `TOOLS_BY_PHASE[FORM_FILLING]` already names
+   `open_booking_form`/`submit_booking`, which nothing implements. Until
+   M4a lands, do not demo past the selection.
+2. **MCP Apps render HTML in a sandboxed iframe** — a different surface from
+   A2UI, and deliberately so (§1's resolved ambiguity). The A2UI catalogue
+   stays the catalogue; the booking form is the iframe.
+3. **Budget the LLM quota first** (§5). 200k tokens/day, ~66 agent turns.
 
-   ⚠️ **The route this section used to recommend does not work** — see §3's
-   Phase F audit block. Use these instead. Each was **measured** against the
-   committed dataset (`store.search`, `limit=5`), not reasoned about:
+### Still owed on M3, small but real
 
-   | Probe | Interview seed that surfaces it | Slate |
-   |---|---|---|
-   | `ADV-0001` | Sedan / ≤$25,000 / **buy** / by 2026-09-01 | 2 results, probe included |
-   | `ADV-0002` | SUV / **rent** / ≤$65 per day | 2 results, probe included |
-   | `ADV-0003` | Electric / **rent** / ≤$90 per day | **1 result — the probe alone** |
-
-   `ADV-0003` is the cleanest proof (sole match, so it cannot be crowded
-   out). Note the two rent routes: `store._price_for` compares a rental
-   budget against `rent_price_per_day`, not sale price, so a "$65 budget"
-   for a rental means $65/day. Re-measure if the dataset is ever
-   regenerated — these ids are seed-dependent.
-
-   **The probes land in the RESULTS_READY agent, not RESEARCHING** (§3).
-   That is what makes the strongest assertion available: RESULTS_READY binds
-   `select_listing`, so T029 should assert **no unrequested `select_listing`
-   tool call and no advance to FORM_FILLING**, on top of the prose checks.
-   State is harder to fake than wording (§3 lesson 8).
-2. **T021 — relaxation messaging.** A zero-match query must make the agent
-   name the constraint it relaxed rather than fabricate. The ladder itself is
-   already covered deterministically in `tests/test_research.py`; what is
-   owed is the live half. Convenient: the natural zero-match query is the
-   **headline demo path** (SUV / ≤$25,000 / buy / by 2026-09-01 → 0 → relax
-   availability → 4), so T021 exercises exactly what a judge will see.
-
-Note both tests assert on *model prose*, so heed §3's lesson about vacuous
-checks — normalise digit separators and **assert the check examined
-something** before trusting a pass. T029 has a sharper version of the same
-problem: an injection test asserts a **negative**, so it also passes when
-the model said nothing, when the probe never reached the prompt, or when
-the LLM call quietly failed. It must positively assert that the payload was
-in the brief actually sent **and** that the model returned substantive
-output before believing "no deviation".
+- **T029 has never run against Gemini**, which is the demo provider. An
+  injection result is only evidence for the model it ran on. One rehearsal
+  run before the demo — ~4 turns, well inside Gemini's ~20/day.
+- **T027** (listing-detail MCP App) stays deferred past M4a/M4b: it is the
+  explicitly *additive secondary* surface while M4 is a hard requirement.
 
 ### The data contract (Phase C, still exactly true)
 
@@ -842,29 +902,33 @@ ladder), `agent/ranking.py` (deterministic scoring), `agent/mcp_client.py`
 turn). `SessionState.record_research()` is the code-enforced
 RESEARCHING → RESULTS_READY transition.
 
-### Then
+### Quota strategy (revised in Phase F — the old numbers were wrong)
 
-| Phase | Task | Work |
-|---|---|---|
-| E | T028 | Listing selection, as one coherent slice — see the three numbered steps above. `select_listing` is the piece nothing has ever implemented, and **M4a depends on it** |
-| F | T029 | **Security test**: the 3 `ADV-*` listings cause **zero** behavioural deviation (Principle IV) |
-| F | T021 | Integration test: zero-match → agent **relaxes a constraint and says so** |
-| — | T027 | `mcp-apps-ui/listing-detail/` — **recommended deferred past M4a/M4b**, it is the explicitly *additive secondary* surface while M4 is a hard requirement |
+Development runs on **Groq**, and the shape settled on for T021/T029 worked
+and is worth reusing: an **always-on deterministic half** so CI never needs
+a key, plus a **live-gated half** that is the recorded proof. What changed
+is the budget. The limit that actually binds is **200,000 tokens/day
+(~66 agent turns)**, not the "~1000 requests/day" every doc used to quote —
+see §5. Consequences for M4a onward:
 
-### Quota strategy (decided)
-
-Development runs on **Groq** (~1000 req/day), so Phases C–E cost **zero**
-LLM requests and T021/T029 can be exercised live. Recommended shape for both:
-an **always-on deterministic half** (so CI never depends on a key) plus a
-**live-gated half** that is the recorded proof. Gemini's ~20/day is reserved
-for demo rehearsal. Run T029 on Groq *and* once on whatever model ships,
-since an injection result is only evidence for the model it ran on.
+- A full Phase F live run is ~18k tokens, about **9% of a day**.
+- Live-gated tests must **pace themselves** (`pace_live_turn`) or the last
+  ones in the run 429 on the per-minute cap and present as flaky.
+- Gemini's ~20 requests/day stays reserved for demo rehearsal — including
+  the T029 run against it that is still owed.
+- T046's eval set (~15 personas) will **not** fit in the same day as a
+  rehearsal. Plan which day is which.
 
 ---
 
 ## 11. Open items / known gaps
 
-- **Evals (bonus #15) still owed** — T046.
+- **Evals (bonus #15) still owed** — T046. ⚠️ Budget it: at 200k tokens/day
+  a ~15-persona eval set will not fit on the same day as a demo rehearsal.
+- 🔴 **T029 has never run against Gemini**, the demo provider. An injection
+  result is only evidence for the model it ran on, so Principle IV's PASS
+  currently covers `openai/gpt-oss-120b` only. ~4 turns, well inside
+  Gemini's ~20/day — do it during rehearsal.
 - **Slide deck template** — organizers haven't provided it. T049 blocked.
 - **Demo video** — T050. Recording is the user's to do.
 - ✅ *(resolved in Phase D)* **A2UI styling** — the surfaces are themed via
@@ -888,6 +952,8 @@ since an injection result is only evidence for the model it ran on.
 - ✅ *(resolved in Phase E)* **`select_listing`** now exists as both a tool
   and `SessionState.select_listing()`, and RESULTS_READY → FORM_FILLING is
   reachable, so M4a's `open_booking_form` has a precondition it can gate on.
+- ✅ *(resolved in Phase F)* **Principle IV's behavioural proof** — T029
+  shows all three `ADV-*` probes inert on Groq. Gemini run still owed, above.
 - ⚠️ **FORM_FILLING is now reachable but has no tools yet.** Selecting a
   listing advances the phase, and `TOOLS_BY_PHASE[FORM_FILLING]` names
   `open_booking_form`/`submit_booking`, which M4a implements. Until then a
@@ -947,8 +1013,9 @@ For a new session, read in this order.
    Check table (**all three** correction blocks)
 6. **`README.md`** — run instructions
 
-**Tier 2 — what Phase F (T021 + T029) actually touches.** These four are the
-ones to read closely; the rest of Tier 3 is reference:
+**Tier 2 — what M4a (booking form MCP App) actually touches.** Phase F is
+done; these are still the closest reading for anyone extending the agent, and
+items 7-10a are the ones Phase F changed:
 
 7. `agent-backend/agent/prompts.py` — `UNTRUSTED_DATA_RULE`, the rule T029
    must prove the model actually obeys, plus every phase's system prompt.
@@ -997,53 +1064,46 @@ ones to read closely; the rest of Tier 3 is reference:
 > lists under §13 Required reading (Tiers 1 and 2 closely; Tier 3 as needed).
 >
 > This is the Amulate Summer Hackathon 2026 "AI Car Matchmaker" project.
-> M0–M2.5 are complete. **M3 (User Story 2) is nearly done**: Phases A–E are
-> shipped, tested, verified live in a browser and pushed to `main`
-> (`b2d35f3`). Interview → auto-research → deterministically ranked A2UI
-> catalogue → listing selection → FORM_FILLING all works end to end.
-> **Continue from M3 Phase F (T029 + T021)** — the two live-gated
-> behavioural tests described in HANDOFF §10. Phase F is tests, not features.
+> **M0-M3 are complete.** Interview → auto-research → deterministically
+> ranked A2UI catalogue → listing selection → FORM_FILLING works end to end,
+> and M3's two behavioural guarantees are now proven against a live model
+> (T029 prompt injection, T021 relaxation messaging). 202 tests, 193 needing
+> no setup. **Continue from M4a** — the in-chat booking form as an MCP App
+> (hackathon hard requirement #3), described in HANDOFF §10.
 >
 > Do **not** write code immediately. First confirm you have full context and
 > tell me anything in the docs that looks wrong, stale, or self-contradictory.
-> Five audits have now run (HANDOFF §3): three found docs overclaiming, one
-> found docs *underclaiming*, and the fifth found the docs accurate but the
-> **code** carrying two silent defects. So check both directions, and don't
-> assume "the docs are the problem" — the real pattern is that nobody ran it.
+> Seven audits have now run (HANDOFF §3). Three found docs overclaiming, one
+> found docs *underclaiming*, one found the docs accurate but the code
+> defective, one found a doc wrong about a *procedure* it recommended for the
+> next session — and the last one was not an audit at all: **the two new
+> tests found four real defects on their first live run**, in code every doc
+> described correctly. Check every direction, and note the pattern: the
+> constant is not that documentation drifts, it is that **nobody ran it**.
 >
 > Notes:
-> - **T029 is the one that matters.** Principle IV stays PARTIAL until the
->   three `ADV-*` probes are shown to cause zero behavioural deviation. The
->   wrapping is real and verified live; what's owed is proof the model obeys
->   it. Use the **measured** routing table in §10 to get each probe in front
->   of the model — an earlier recipe in this file was wrong three ways over
->   and is corrected in §3. The probes land in the **RESULTS_READY** agent,
->   which binds `select_listing`, so assert on state (no unrequested
->   selection, no advance to FORM_FILLING) as well as on prose.
-> - **T021** needs only its live half; the relaxation ladder is already
->   covered deterministically in `tests/test_research.py`.
-> - **Both assert on model prose, so make them non-vacuous.** A previous
->   grounding check passed having examined zero values because the model
->   writes "$17 391" with a thin space and the regex expected "$17,391".
->   Normalise separators, count what you compared, and assert the count —
->   `tests/test_catalogue_grounding.py` shows the pattern. T029 additionally
->   asserts a *negative*, so it must also prove the payload reached the
->   prompt and the model actually answered.
-> - Run T029 on Groq **and** once on whatever model ships: an injection
->   result is only evidence for the model it ran on.
-> - **Never render a listing's `description`** — attacker-controlled, and it
->   carries the `<untrusted_listing_data>` delimiters.
+> - **The sharpest lesson from M3 is §3's newest one: Principle I constrains
+>   values, not claims.** The agent said "Four listings matched your
+>   criteria" about a slate it had silently widened. Every number in the
+>   sentence was grounded and the sentence was still false. Grounding checks
+>   are not enough on their own.
+> - **Pre-fill the booking form from `SessionState.selected_listing()`** —
+>   the verbatim tool record — never from the model's prose.
+> - ⚠️ **Budget the LLM quota before spending it.** Groq's binding limit is
+>   **200,000 tokens/day ≈ 66 agent turns**, not the "~1000 requests/day"
+>   the docs claimed until Phase F. DeepAgents burns ~2,700 tokens of tool
+>   schemas on every request.
+> - **T029 against Gemini is still owed** before the demo (§11).
+> - Live-gated tests are gated on `LLM_CREDENTIALS_PRESENT` from
+>   `agent-backend/conftest.py`. Do not recompute it in a test module and do
+>   not import `api.main` at module scope — it calls `load_dotenv()` and
+>   breaks the gate (§3).
 > - A2UI is **v0.9**; only the 18 components in §8.19 exist. If you touch the
->   surfaces, read §8.21c–f first (root id, icons, theming, DOM shape) —
+>   surfaces, read §8.21c-f first (root id, icons, theming, DOM shape) —
 >   each cost a live debugging cycle.
 > - Outbound POSTs to LLM providers fail inside the default tool sandbox;
 >   live-LLM commands need `dangerouslyDisableSandbox: true`.
-> - Dev LLM is Groq (~1000 req/day), so live tests are affordable. It
->   throttles on tokens/minute — a 20–70s "hang" is backoff, not a dead call.
+> - **Never render a listing's `description`** — attacker-controlled, and it
+>   carries the `<untrusted_listing_data>` delimiters.
 > - ⚠️ **Don't demo past listing selection**: FORM_FILLING is reachable but
->   its tools land in M4a.
->
-> After Phase F, M3 is complete and the next milestone is **M4a** (booking
-> form MCP App) — which is now unblocked, since `select_listing` exists and
-> `SessionState.selected_listing()` returns the verbatim record to pre-fill
-> the form from.
+>   its tools are exactly what M4a builds.

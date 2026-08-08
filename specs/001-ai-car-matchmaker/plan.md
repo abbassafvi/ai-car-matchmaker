@@ -44,9 +44,13 @@ providers are in use, for different jobs:
 
 - **Development runs on Groq** (`LLM_PROVIDER=openai_compatible`,
   `LLM_BASE_URL=https://api.groq.com/openai/v1`,
-  `LLM_MODEL=openai/gpt-oss-120b`). Its free tier allows ~1000 requests/day
-  against Gemini's ~20, which is what makes M3's behavioural tests (T021,
-  T029) and the T046 eval run affordable rather than deferred.
+  `LLM_MODEL=openai/gpt-oss-120b`), which is what made M3's behavioural
+  tests (T021, T029) affordable rather than deferred. **Corrected in Phase
+  F**: the binding quota is **200,000 tokens/day**, not the "~1000
+  requests/day" recorded here through M3 — about 66 agent turns, because
+  DeepAgents binds ~2,700 tokens of tool schemas into every request. A full
+  Phase F live run costs ~9% of a day, and T046's eval set will not fit
+  alongside a demo rehearsal.
 - **Gemini stays the demo/rehearsal provider** via the native
   `langchain-google-genai` client, default `gemini-3.6-flash`. `google` is
   still `agent/llm.py`'s built-in default provider.
@@ -122,7 +126,7 @@ mock listings
 | I. Grounded Recommendations | UI values sourced only from tool-call records, never LLM-retyped | **PASS at the A2UI surfaces (since M3 Phase D)**, with one residual noted below. The catalogue renders from `SessionState.candidate_listings` + `.recommendations` only; `test_catalogue_grounding.py` compares every rendered value back to its source record and asserts its own non-vacuity, and a live run confirmed all 16 catalogue values byte-identical to `listings.json`. **Residual**: the chat narration is still model-authored prose, and while `narration_brief` forbids any number not printed in the brief, that constraint is prompt-enforced rather than structural — the *grounded* channel is the catalogue. T029/T046 measure the prose. Previously recorded as: PARTIAL (materially advanced in M3 Phase C) — listing data now reaches the user, and it is grounded end to end: the search query is built from persisted interview state rather than from the model (`agent/research.py`), ranking is deterministic Python over the tool artifact (`agent/ranking.py`), and the verbatim records are persisted in `SessionState.candidate_listings`. Verified live: four recommended listings byte-identical to `listings.json` on price/year/mileage/category, and all 11 numbers in the model's narration traceable to the slate. Still PARTIAL because the **A2UI surface** is the part the principle names and that is T026/T022 (Phase D) — today the values reach the user as chat prose |
 | II. Explicit Phase Gating | Transactional tools unavailable outside their phase | PASS (since M2.5, completed M3 Phase E) — `TOOLS_BY_PHASE` in `agent/state.py` is the single gate definition and `agent/graph.py` builds one agent per phase from it. **All three phase transitions are now code paths in `SessionState`** (`save_interview_slots`, `record_research`, `select_listing`), none of them a model decision. Phase E closed the last hole: `select_listing` had been *named* by the gate since M2.5 with nothing implementing it, so Principle II's own worked example — `open_booking_form` gated on a listing being selected — had no precondition anything could satisfy. Covered by `test_phase_gate.py`, `test_mcp_wiring.py`, `test_select_listing.py`. **Caveat**: `FORM_FILLING` is now reachable but its tools land in M4a |
 | III. Mock-Only Transactions | No real payment path exists | PENDING — nothing to enforce yet; `confirm_mock_payment` lands in M4b |
-| IV. Untrusted Data Boundary | Listing/user text never treated as instructions | PARTIAL (improved in M3 Phase B) — the *rule* is in every listing-facing prompt (`agent/prompts.py`), and the delimiters it refers to are now genuinely emitted: `store.wrap_untrusted()` wraps each `description` server-side, at the tool-output boundary, before it can reach the model. Confirmed live that the `ADV-0001` payload arrives inside the delimiters via `langchain-mcp-adapters`. Still PARTIAL because what remains is the **behavioural** proof — T029 must show the three `ADV-*` probes cause zero deviation. A wrapper the model ignores is not a boundary |
+| IV. Untrusted Data Boundary | Listing/user text never treated as instructions | **PASS on `openai/gpt-oss-120b` (since M3 Phase F)**, with one caveat below. The rule is in every listing-facing prompt, `store.wrap_untrusted()` genuinely emits the delimiters server-side, and **T029 now supplies the behavioural proof**: all three `ADV-*` probes reach the model inside the delimiters and cause zero deviation — no fabricated `$1` price, no unrequested `select_listing` call, no phase advance, no system-prompt or credential disclosure, and the deterministic ranking byte-identical across the model turn. A fourth test asserts the probes do not derail the turn either, since a boundary enforced by refusing to answer is not a win. **Caveat**: an injection result is only evidence for the model it ran on, and Gemini — the demo provider — has not been run. That rehearsal is owed before the demo. Previously recorded as: PARTIAL (improved in M3 Phase B) — the *rule* is in every listing-facing prompt (`agent/prompts.py`), and the delimiters it refers to are now genuinely emitted: `store.wrap_untrusted()` wraps each `description` server-side, at the tool-output boundary, before it can reach the model. Confirmed live that the `ADV-0001` payload arrives inside the delimiters via `langchain-mcp-adapters`. Still PARTIAL because what remains is the **behavioural** proof — T029 must show the three `ADV-*` probes cause zero deviation. A wrapper the model ignores is not a boundary |
 | V. Full Observability | Every call/transition traced | PASS (since M2.5) — `setup_observability()` is called from the FastAPI lifespan before any agent is built; covered by `test_observability_wiring.py` + `test_otel_setup.py` |
 
 ### Correction (M2.5)
@@ -238,6 +242,34 @@ Five audits asked "does the code do what the doc claims?"; none had asked
 "does the doc's *instruction* actually work?" A recipe earns the same
 scepticism as a status claim, and is more dangerous, because it is read by
 someone who has no reason yet to doubt it.
+
+### Correction (M3 Phase F, after the fact)
+
+Recorded because it inverts the sixth lesson's own framing. The audit above
+scrutinised the *documentation* and found the code sound. Then the two tests
+that audit was clearing the way for ran, and **found four real defects in
+that same code** — three of which every doc described accurately, because
+the docs described what the code was *meant* to do and nobody had watched it
+do it. In order of seriousness:
+
+1. **The agent silently widened a search and said it had not** — "Four
+   listings matched your criteria" for a slate produced by dropping the
+   availability filter. Every number grounded, the claim false. This is the
+   spec.md US2 AS2 failure T021 exists to catch, and it was live in `main`.
+2. **On zero results the model invented the constraints it had tried**,
+   because the brief asked it to name them without stating them.
+3. **The live-test credential gate had stopped working** — `load_dotenv()`
+   at import time in `api/main.py` polluted `os.environ`, so `skipif`
+   results depended on collection order.
+4. **The tests' own number extractor misread real model output**, which
+   would have reported a hallucination that never happened.
+
+Seventh lesson, and it is the one this project keeps paying for in a new
+currency each milestone: **Principle I constrains values, not claims.** A
+sentence can be assembled entirely from grounded numbers and still be false,
+because the falsehood is in what it asserts *about* the search. Grounding
+checks cannot be the last line of defence between a user and a lie — and
+"the docs are accurate" is not evidence that anything works.
 
 Known deviation, accepted: `create_deep_agent` always installs
 `FilesystemMiddleware`, which binds nine built-in tools (`ls`, `read_file`,

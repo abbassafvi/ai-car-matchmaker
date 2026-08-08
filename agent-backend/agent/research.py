@@ -46,6 +46,15 @@ class ResearchOutcome:
     listings: list[dict[str, Any]] = field(default_factory=list)
     recommendations: list[RankedRecommendation] = field(default_factory=list)
     query: dict[str, Any] = field(default_factory=dict)
+    # The constraints the *user* actually gave, before any relaxation.
+    # `query` is overwritten with each rung, so without this the original is
+    # gone by the time the brief is written -- and the model cannot say what
+    # changed if it is only shown the result. Measured live (T021): given
+    # only the relaxed query, gpt-oss-120b described a $28,000-$36,000 band
+    # as the user's "original" range when they had asked for $28,000-$30,000.
+    # Accurate on every number it printed, and still wrong about the fact
+    # spec.md US2 AS2 exists to guarantee.
+    original_query: dict[str, Any] = field(default_factory=dict)
     relaxed: list[str] = field(default_factory=list)
     steps: list[str] = field(default_factory=list)
     # Parallel to `steps`, one semantic kind per step. It exists so the A2UI
@@ -173,7 +182,7 @@ async def run_research(
         return unavailable
 
     query = query_from_interview(interview)
-    outcome = ResearchOutcome(query=query)
+    outcome = ResearchOutcome(query=query, original_query=dict(query))
     outcome.add_step("search", _describe_query(query))
 
     try:
@@ -217,6 +226,11 @@ async def run_research(
     return outcome
 
 
+def _applied(query: dict[str, Any]) -> str:
+    """Only the constraints that were actually set, as a plain mapping."""
+    return str({k: v for k, v in query.items() if v is not None})
+
+
 def _describe_query(query: dict[str, Any]) -> str:
     """A human-readable account of the constraints actually being applied."""
     applied = {k: v for k, v in query.items() if v is not None}
@@ -224,6 +238,18 @@ def _describe_query(query: dict[str, Any]) -> str:
         return "Searching the marketplace with no constraints."
     rendered = ", ".join(f"{k}={v}" for k, v in applied.items())
     return f"Searching the marketplace for {rendered}."
+
+
+def relaxed_labels(relaxed: list[str]) -> str:
+    """Ladder step keys rendered as the phrases a user would recognise.
+
+    The keys ("availability") are internal; the ladder already carries a
+    human label for each ("target availability date"), so the brief and the
+    reasoning trace name the same thing rather than leaking a variable name
+    into the chat.
+    """
+    labels = dict(RELAXATION_LADDER)
+    return ", ".join(labels.get(step, step) for step in relaxed)
 
 
 def narration_brief(outcome: ResearchOutcome) -> str:
@@ -244,11 +270,28 @@ def narration_brief(outcome: ResearchOutcome) -> str:
         )
 
     if not outcome.found:
+        # The constraints are spelled out because the previous version asked
+        # the model to "say which constraints were tried" without telling it
+        # what they were. Measured live (T021): gpt-oss-120b filled the gap
+        # with a plausible markdown table asserting "Transaction type: all
+        # types (sale, lease, etc.)" when the search had only ever asked for
+        # `buy`. No listing was invented, so Principle I's letter held -- but
+        # the user was still told something untrue about their own search.
+        #
+        # The formatting rule is repeated here for the same reason it exists
+        # in the found branch (T026 finding (e)): the chat bubble renders
+        # markdown as literal asterisks, and this branch never got the fix.
         return (
-            "The marketplace returned NO listings, even after relaxing "
-            f"{', '.join(outcome.relaxed) or 'nothing'}. Tell the user that "
-            "nothing matched, say which constraints were tried, and ask which "
-            "one they would like to change. Do not invent listings."
+            "The marketplace returned NO listings.\n"
+            f"The user originally asked for: {_applied(outcome.original_query)}\n"
+            f"The widest search actually run was: {_applied(outcome.query)}\n"
+            f"Constraints relaxed along the way: "
+            f"{relaxed_labels(outcome.relaxed) or 'none'}\n"
+            "Tell the user plainly that nothing matched, name only the "
+            "constraints listed above -- do not invent, assume or add any "
+            "others -- and ask which one they would like to change. Do not "
+            "invent listings. Write 2-3 plain sentences: no markdown, no "
+            "tables, no bullet points, no asterisks, no numbered lists."
         )
 
     lines = [
@@ -258,9 +301,12 @@ def narration_brief(outcome: ResearchOutcome) -> str:
         f"Constraints applied: {outcome.query}",
     ]
     if outcome.relaxed:
+        lines.insert(2, f"The user originally asked for: {_applied(outcome.original_query)}")
         lines.append(
             f"NOTE: nothing matched the original constraints, so these were "
-            f"relaxed: {', '.join(outcome.relaxed)}. Say so explicitly."
+            f"relaxed: {relaxed_labels(outcome.relaxed)}. Say so explicitly. "
+            f"The line above is what they asked for; the line below is what "
+            f"was actually searched after widening."
         )
     lines.append("")
 
@@ -291,11 +337,29 @@ def narration_brief(outcome: ResearchOutcome) -> str:
         "IMPORTANT: the user can already SEE all of these listings as cards "
         "next to this chat, with prices, specs, availability and reasoning. "
         "Do NOT re-list them or repeat their numbers.",
-        "Instead write 2-3 short sentences: say how many matched, name your "
+        "Instead write 2-3 short sentences: say how many you found, name your "
         "top pick and why it suits what they told you, and invite them to "
         "ask about any of them. Plain sentences only -- no markdown, no "
         "bullet points, no asterisks, no numbered lists.",
         "If you do mention a number, it must appear verbatim above -- never "
         "compute, round, or add one.",
     ]
+
+    # spec.md US2 AS2 is "relaxes AND states which constraint it relaxed", and
+    # the NOTE higher up was not enough to get the second half: measured live
+    # (T021, gpt-oss-120b), the model read the closing instructions -- which
+    # are last and concrete -- and opened with "Four listings matched your
+    # criteria" for a slate that only existed because the availability filter
+    # had been dropped. Every value in that sentence was grounded and the
+    # sentence was still false. So the disclosure is restated here, last,
+    # with the specific wording that went wrong called out.
+    if outcome.relaxed:
+        lines += [
+            "",
+            f"CRITICAL: these listings do NOT meet everything the user asked "
+            f"for. Nothing matched, so the {relaxed_labels(outcome.relaxed)} "
+            f"was relaxed to find them. Your FIRST sentence must say that "
+            f"plainly. Do NOT say they 'matched your criteria' or 'meet your "
+            f"requirements' -- they do not.",
+        ]
     return "\n".join(lines)

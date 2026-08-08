@@ -8,14 +8,12 @@ import os
 import uuid
 
 import pytest
+
+from conftest import LLM_CREDENTIALS_PRESENT
 from fastapi.testclient import TestClient
 
 
-def _has_llm_credentials() -> bool:
-    return bool(os.environ.get("LLM_API_KEY"))
-
-
-@pytest.mark.skipif(not _has_llm_credentials(), reason="LLM_API_KEY not set")
+@pytest.mark.skipif(not LLM_CREDENTIALS_PRESENT, reason="LLM_API_KEY not set")
 def test_full_round_trip_over_websocket(tmp_path):
     os.environ["SESSIONS_DB_PATH"] = str(tmp_path / "sessions.sqlite")
     from api.main import app  # imported here so SESSIONS_DB_PATH is set first

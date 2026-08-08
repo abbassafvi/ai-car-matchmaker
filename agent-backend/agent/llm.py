@@ -8,6 +8,8 @@ claim -- this module is what makes it true):
   LLM_MODEL     model id as that provider names it
   LLM_API_KEY   credential -- environment only, never hardcoded, never logged
   LLM_BASE_URL  openai_compatible only: the /chat/completions base URL
+  LLM_MAX_TOKENS   output cap override (DEFAULT_MAX_TOKENS_BY_PROVIDER)
+  LLM_MAX_RETRIES  retry budget override (DEFAULT_MAX_RETRIES_BY_PROVIDER)
 
 Why "google" is the default rather than Gemini's OpenAI-compatibility
 endpoint, which would have been the smaller change:
@@ -64,6 +66,33 @@ def default_max_tokens(provider: str) -> int:
     return DEFAULT_MAX_TOKENS_BY_PROVIDER.get(provider, DEFAULT_MAX_TOKENS)
 
 
+# Retry budget, per provider. The client default is 2, which is too few for
+# Groq and it matters more than it looks.
+#
+# Groq's limit is TOKENS per minute, not requests, so the ceiling is reached
+# by a *burst* rather than by sustained load, and it clears in about a
+# second: the 429 body literally says "Please try again in 1.005s". Two
+# retries is enough for one throttled turn and not enough for several in
+# succession -- which is exactly the shape of both a judge clicking through
+# a demo and Phase F's live test run. Measured: six live agent turns
+# back to back exhausted the default budget and raised
+# `openai.RateLimitError: ... Limit 8000, Used 5609, Requested 2525`.
+#
+# HANDOFF §11 lists the TPM ceiling as the main demo risk; this is the
+# cheapest mitigation for it, and it costs nothing when nothing is throttled.
+# Trading a slower turn for a completed one is the right way round here --
+# the alternative is the agent visibly dying mid-sentence.
+DEFAULT_MAX_RETRIES_BY_PROVIDER = {
+    "google": 2,
+    "openai_compatible": 6,
+}
+DEFAULT_MAX_RETRIES = 2
+
+
+def default_max_retries(provider: str) -> int:
+    return DEFAULT_MAX_RETRIES_BY_PROVIDER.get(provider, DEFAULT_MAX_RETRIES)
+
+
 class LLMNotConfiguredError(RuntimeError):
     """Raised when no API key is available.
 
@@ -99,6 +128,9 @@ def build_model(max_tokens: int | None = None):
         env_override = os.environ.get("LLM_MAX_TOKENS")
         max_tokens = int(env_override) if env_override else default_max_tokens(provider)
 
+    retries_override = os.environ.get("LLM_MAX_RETRIES")
+    max_retries = int(retries_override) if retries_override else default_max_retries(provider)
+
     if provider == "google":
         from langchain_google_genai import ChatGoogleGenerativeAI
 
@@ -106,6 +138,7 @@ def build_model(max_tokens: int | None = None):
             model=model,
             google_api_key=api_key,
             max_tokens=max_tokens,
+            max_retries=max_retries,
         )
 
     if provider == "openai_compatible":
@@ -116,6 +149,7 @@ def build_model(max_tokens: int | None = None):
             api_key=api_key,
             model=model,
             max_tokens=max_tokens,
+            max_retries=max_retries,
         )
 
     raise ValueError(

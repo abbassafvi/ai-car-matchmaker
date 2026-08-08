@@ -15,14 +15,12 @@ import os
 import pytest
 from langgraph.checkpoint.memory import InMemorySaver
 
+from conftest import LLM_CREDENTIALS_PRESENT
+
 from agent.graph import build_interview_agent, new_session_state
 
 
-def _has_llm_credentials() -> bool:
-    return bool(os.environ.get("LLM_API_KEY"))
-
-
-@pytest.mark.skipif(not _has_llm_credentials(), reason="LLM_API_KEY not set")
+@pytest.mark.skipif(not LLM_CREDENTIALS_PRESENT, reason="LLM_API_KEY not set")
 def test_all_slots_in_one_message_transitions_to_researching():
     agent = build_interview_agent(checkpointer=InMemorySaver())
     config = {"configurable": {"thread_id": "test-thread-1"}}

@@ -12,17 +12,20 @@ Built for the Amulate Summer Hackathon 2026.
 
 M0 (scaffolding) + M1 (foundational) + M2 (conversational interview, User
 Story 1) + M2.5 (audit remediation) complete. **M3 (research & ranked
-recommendations, User Story 2) is in progress** — the marketplace MCP server
+recommendations, User Story 2) is complete** — the marketplace MCP server
 is built, the agent runs fully async against it, and interview → automatic
 research → deterministically ranked, explained recommendations now works end
 to end and **renders live as A2UI surfaces**: an interview checklist, a
 reasoning-steps trace of how the search ran, and a catalogue of ranked cards.
 Listing selection works too — each catalogue card has a button that records
-the choice and advances the phase. The in-chat MCP Apps (booking form, mock
-checkout) are the remaining M4 work.
+the choice and advances the phase. **User Story 2 is complete**, including
+its two behavioural guarantees, both proven against a live model: the three
+seeded prompt-injection listings cause zero deviation, and a search that
+matches nothing is widened *and said so*. The in-chat MCP Apps (booking
+form, mock checkout) are the remaining M4 work.
 
-**164 automated tests**, of which **161 run with no external setup at all**
-(35 `mcp-services` + 126 `agent-backend`); the remaining 3 need a live LLM key
+**202 automated tests**, of which **193 run with no external setup at all**
+(39 `mcp-services` + 154 `agent-backend`); the remaining 9 need a live LLM key
 and/or a running Phoenix and auto-skip without them. Plus live end-to-end
 verification against a real Docker Compose build. See
 [`specs/001-ai-car-matchmaker/`](specs/001-ai-car-matchmaker/) for the full
@@ -56,9 +59,11 @@ Without a key the stack still comes up — `/health` reports
 the backend dying at startup.
 
 > **Quota note**: Gemini's free tier allows roughly **20 requests per day
-> per model** — a smoke test, not a live demo. Groq's free tier allows
-> ~1000/day and works end-to-end with tool calling, so it is the default
-> for development; see `.env.example` for both configurations.
+> per model** — a smoke test, not a live demo. Groq works end-to-end with
+> tool calling and is the default for development; see `.env.example` for
+> both configurations. Groq's binding limit is **200,000 tokens per day**
+> (~66 agent turns here) plus 8,000 tokens per minute, so a burst of turns
+> can be throttled — the client retries, and it is backoff, not a hang.
 >
 > If you point `LLM_PROVIDER=openai_compatible` at Groq, leave
 > `LLM_MAX_TOKENS` alone unless you re-measure: Groq rate-limits on *tokens
@@ -115,7 +120,7 @@ failure, but check the provider account before assuming a code bug.
 ## Tech stack
 
 - **Agent harness**: [LangChain DeepAgents](https://docs.langchain.com/labs/deep-agents/overview) (LangGraph)
-- **LLM provider**: config, not code. `LLM_PROVIDER=google` uses [Google Gemini](https://ai.google.dev/) via the native `langchain-google-genai` client (default `gemini-3.6-flash`); `LLM_PROVIDER=openai_compatible` uses any OpenAI-compatible API. Development runs on [Groq](https://groq.com/) (`openai/gpt-oss-120b`) because its free tier allows ~1000 requests/day against Gemini's ~20, keeping the scarce Gemini quota for demo rehearsal
+- **LLM provider**: config, not code. `LLM_PROVIDER=google` uses [Google Gemini](https://ai.google.dev/) via the native `langchain-google-genai` client (default `gemini-3.6-flash`); `LLM_PROVIDER=openai_compatible` uses any OpenAI-compatible API. Development runs on [Groq](https://groq.com/) (`openai/gpt-oss-120b`), keeping the scarce Gemini quota for demo rehearsal. Groq's free tier is generous on request count but capped at **200,000 tokens/day** — roughly 66 agent turns here, since the DeepAgents harness binds ~2,700 tokens of tool schemas into every request
 - **Tool protocol**: [MCP](https://modelcontextprotocol.io/) (Python SDK, Streamable HTTP) — marketplace server live; booking/payment in M4
 - **In-chat transactional UI**: [MCP Apps](https://apps.extensions.modelcontextprotocol.io/) — booking form + mock checkout (sandboxed iframes) — M4
 - **Generative UI**: [A2UI](https://a2ui.org/) v0.9 protocol via the real [`@a2ui/react`](https://www.npmjs.com/package/@a2ui/react) renderer — car catalogue + live agent progress/reasoning

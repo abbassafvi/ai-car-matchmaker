@@ -375,7 +375,7 @@ decision for the user** and should be settled before Phase C starts.
 - [x] T021 [P] [US2] Integration test: zero-match query triggers constraint
       relaxation messaging, not fabricated results.
       **DONE (Phase F)** — `agent-backend/tests/test_relaxation_messaging.py`
-      (7 tests: 5 deterministic guards + 2 live-gated).
+      (5 tests: 3 deterministic guards + 2 live-gated).
 
       Filed there rather than in `test_research.py` (named below) because
       that module's docstring promises everything in it is deterministic and
@@ -839,7 +839,7 @@ running the new tests:
   tests pace themselves 24s apart.
 - **The tests' own price extractor was wrong**: it read `$25 000` as `25`
   because gpt-oss-120b separates thousands with U+202F. Now covered by
-  `tests/test_live_prose_helpers.py` (22 tests) against real captured
+  `tests/test_live_prose_helpers.py` (20 tests) against real captured
   output.
 
 ---

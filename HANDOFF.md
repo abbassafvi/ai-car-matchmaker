@@ -538,7 +538,7 @@ python mcp-services/data/generate_listings.py
 | `conftest.py` | Puts the service root on `sys.path` so the suite collects under a bare `pytest`, not only `python -m pytest`. Added by the Phase C audit — see §3 |
 | `conftest.py` (gate) | Also holds **`LLM_CREDENTIALS_PRESENT`**, the single source of truth for the live-LLM gate. Must stay there: `api/main.py`'s import-time `load_dotenv()` pollutes `os.environ`, so any `skipif` computed inside a test module is order-dependent (§3) |
 | `tests/support_live.py` | Phase F shared fixtures: probe/relaxation routes, `scripted_search_tool` (a real `StructuredTool` shaped like the MCP adapter), the U+202F-aware `dollar_amounts`, `grounded_numbers`, and `pace_live_turn`. Not collected (`support_*`) |
-| `tests/` | **19 modules, 163 tests** (+`test_prompt_injection` 9 = T029, `test_relaxation_messaging` 7 = T021, `test_live_prose_helpers` 22)<br>previously **16 modules, 129 tests** (+`test_select_listing` 21 = T028b)<br>previously **15 modules, 106 tests** (+`test_catalogue_grounding` 24 = T022)<br>previously **14 modules, 82 tests** (`test_ranking` 12, `test_research` 17, `test_mcp_wiring` 8)<br>and before that **11 modules, 45 tests**: `test_state`(6), `test_tools`(5), `test_graph_persistence`(2), `test_render_a2ui`(8), `test_chat_endpoint`(3), `test_chat_endpoint_error_handling`(1), `test_interview_agent`(1), `test_otel_setup`(1), `test_phase_gate`(10), `test_observability_wiring`(2), `test_message_text`(6) |
+| `tests/` | **19 modules, 163 tests** (+`test_prompt_injection` 9 = T029, `test_relaxation_messaging` 5 = T021, `test_live_prose_helpers` 20)<br>previously **16 modules, 129 tests** (+`test_select_listing` 21 = T028b)<br>previously **15 modules, 106 tests** (+`test_catalogue_grounding` 24 = T022)<br>previously **14 modules, 82 tests** (`test_ranking` 12, `test_research` 17, `test_mcp_wiring` 8)<br>and before that **11 modules, 45 tests**: `test_state`(6), `test_tools`(5), `test_graph_persistence`(2), `test_render_a2ui`(8), `test_chat_endpoint`(3), `test_chat_endpoint_error_handling`(1), `test_interview_agent`(1), `test_otel_setup`(1), `test_phase_gate`(10), `test_observability_wiring`(2), `test_message_text`(6) |
 
 ### mcp-services (Python) — **rewritten in M3 Phase B**
 | File | Purpose |
@@ -849,9 +849,9 @@ tests found real defects in shipped code, and the fixes changed
 | Produced by Phase F | Where |
 |---|---|
 | T029 — 3 `ADV-*` probes proven inert (Principle IV → PASS on gpt-oss-120b) | `tests/test_prompt_injection.py` (9 tests, 4 live-gated) |
-| T021 — relaxation disclosure + empty-slate honesty, live | `tests/test_relaxation_messaging.py` (7 tests, 2 live-gated) |
+| T021 — relaxation disclosure + empty-slate honesty, live | `tests/test_relaxation_messaging.py` (5 tests, 2 live-gated) |
 | Shared live fixtures, prose helpers, TPM pacing | `tests/support_live.py` |
-| The extractor's own tests | `tests/test_live_prose_helpers.py` (22 tests) |
+| The extractor's own tests | `tests/test_live_prose_helpers.py` (20 tests) |
 | Probe routes pinned against the real dataset | `mcp-services/tests/test_marketplace.py` (+4) |
 | Relaxation disclosure + zero-result constraint reporting | `agent/research.py` (`original_query`, `relaxed_labels`, the `CRITICAL` block) |
 | Retry budget for Groq's TPM bursts | `agent/llm.py` (`DEFAULT_MAX_RETRIES_BY_PROVIDER`) |

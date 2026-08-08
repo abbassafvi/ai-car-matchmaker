@@ -210,6 +210,35 @@ Fifth lesson: **a defect can hide in a default**, and "the docs are wrong" is
 only one of the failure modes. The constant across all five audits is not
 that documentation drifts — it is that **nobody ran the thing**.
 
+### Correction (M3 Phase F / pre-Phase-F audit)
+
+A sixth audit, run before Phase F. It found a **new variant**: the docs were
+accurate about shipped code, but wrong about a *procedure* — a recipe for how
+the next session should do its work. HANDOFF §10 and §13 had recommended,
+across two milestones, that T029 surface the `ADV-0002` probe via "a
+budget-constrained SUV search that relaxes its budget". Measured against the
+committed dataset, that route fails three ways independently: the relaxation
+ladder tries availability first and succeeds there, so the budget rung never
+runs; the 1.2 factor lifts $25,000 only to $30,000 while the probe costs
+$31,000; and the 5-item slate truncation would drop it regardless, since it
+is the 7th-cheapest match. Three measured replacement routes are now recorded
+in tasks.md T029 and HANDOFF §10.
+
+The same audit found an unrecorded fact that changes what T029 must target:
+**the probes reach the RESULTS_READY agent, not the RESEARCHING one.**
+`_run_research_turn` advances the phase via `record_research()` before it
+selects the narrator, so the untrusted narration brief is consumed under
+`RESULTS_SYSTEM_PROMPT`. Row IV below is unaffected — both prompts carry
+`UNTRUSTED_DATA_RULE` — but RESULTS_READY additionally binds
+`select_listing`, so T029 gains a state-level assertion (no unrequested
+selection, no advance to FORM_FILLING) that is stronger than any prose check.
+
+Sixth lesson: **prose describing future work is untested by construction.**
+Five audits asked "does the code do what the doc claims?"; none had asked
+"does the doc's *instruction* actually work?" A recipe earns the same
+scepticism as a status claim, and is more dangerous, because it is read by
+someone who has no reason yet to doubt it.
+
 Known deviation, accepted: `create_deep_agent` always installs
 `FilesystemMiddleware`, which binds nine built-in tools (`ls`, `read_file`,
 `write_file`, `edit_file`, `delete`, `glob`, `grep`, `execute`, `task`) in

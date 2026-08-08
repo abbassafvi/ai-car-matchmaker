@@ -946,7 +946,25 @@ leaving the chat window (SC-003).
       via Phoenix LLM-as-judge
 - [ ] T047 README finalized as the single source of run instructions
 - [ ] T048 Final Review checklist (plan.md/spec.md) walked and checked off
-- [ ] T049 Slide deck outline drafted (pending hackathon-provided template)
+- [x] T049 Slide deck outline drafted —
+      `specs/001-ai-car-matchmaker/deck-outline.md`. 11 slides, content
+      complete, with speaker notes, a demo script and per-slide evidence.
+
+      **The "pending hackathon-provided template" blocker was mis-scoped.**
+      It sat on this task for two milestones, but a template governs
+      *styling* — masters, fonts, palette, logo placement. It never governed
+      the narrative, the slide order, or what evidence goes on each slide,
+      which is the part that takes thought and the part T049 actually asks
+      for. Same class of mistake as the T029 routing recipe: a plausible
+      dependency nobody tested by trying to work around it.
+
+      Genuinely still blocked on the organizers: the visual template, and
+      the hard slide count / time limit (the outline assumes ~5 min, and
+      records a cut order if it is shorter).
+
+      Two slides carry placeholders until M4a/M4b land — the demo
+      walkthrough and the requirements scorecard — both marked in the file
+      with exactly what to drop in.
 - [ ] T050 Demo video recording script drafted
 
 ---

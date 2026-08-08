@@ -43,7 +43,7 @@ and a *mocked* checkout **without leaving the chat**.
 | 10 | Spec-driven development (e.g. GitHub spec-kit) | ✅ full trail |
 | 11 | Ship as Docker container **or** deployed public app | ✅ `docker compose up` verified |
 | 12 | Public GitHub repo, documented, README with run instructions | ✅ |
-| 13 | Short slide deck (template from organizers — **not yet received**) | ⬜ blocked |
+| 13 | Short slide deck (template from organizers — **not yet received**) | 🟡 **content drafted** — `specs/001-ai-car-matchmaker/deck-outline.md`; only styling awaits the template |
 | 14 | Short video demo of the working app | ⬜ |
 | 15 | **Bonus**: AI observability + evals via Langfuse or Arize Phoenix over OTel | 🟡 observability ✅ (real spans verified); **evals still owed** (T046) |
 
@@ -531,6 +531,7 @@ python mcp-services/data/generate_listings.py
 | `specs/001-ai-car-matchmaker/spec.md` | US1–US5, edge cases, FR-001…FR-012, key entities, SC-001…SC-006, assumptions |
 | `specs/001-ai-car-matchmaker/plan.md` | Architecture, tech context, Constitution gate check (**with the M2.5 *and* M3 corrections recorded**) |
 | `specs/001-ai-car-matchmaker/tasks.md` | **T001–T059 across M0–M6**; Phase 3.5 = M2.5; **Phase 4 = M3, T020/T023 now checked with findings recorded** |
+| `specs/001-ai-car-matchmaker/deck-outline.md` | **T049**: 11-slide deck content, speaker notes, demo script (incl. the year-end target-date trap), per-slide evidence, and the two slides that wait on M4a/M4b |
 
 ### agent-backend (Python)
 | File | Purpose |
@@ -945,7 +946,13 @@ see §5. Consequences for M4a onward:
 - ✅ *(resolved in Phase F)* **T029 against Gemini** — run on
   `gemini-3.6-flash`, the demo provider, and clean. Principle IV's PASS now
   covers both shipped models. Re-run it if the model is ever changed.
-- **Slide deck template** — organizers haven't provided it. T049 blocked.
+- ✅ *(resolved)* **Slide deck** — T049 is drafted at
+  `specs/001-ai-car-matchmaker/deck-outline.md` (11 slides, speaker notes,
+  demo script, per-slide evidence). It had been recorded as "blocked on the
+  organizers' template" since M0; that was **mis-scoped** — a template
+  governs styling, not narrative. Still owed from the organizers: the
+  visual template and the hard slide count. Two slides hold placeholders
+  until M4a/M4b.
 - **Demo video** — T050. Recording is the user's to do.
 - ✅ *(resolved in Phase D)* **A2UI styling** — the surfaces are themed via
   `frontend/src/a2ui-theme.css` (`--a2ui-*` custom properties, §8.21e) and

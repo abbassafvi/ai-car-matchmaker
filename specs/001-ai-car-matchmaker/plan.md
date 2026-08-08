@@ -120,7 +120,7 @@ mock listings
 | Principle | Gate | Status |
 |---|---|---|
 | I. Grounded Recommendations | UI values sourced only from tool-call records, never LLM-retyped | **PASS at the A2UI surfaces (since M3 Phase D)**, with one residual noted below. The catalogue renders from `SessionState.candidate_listings` + `.recommendations` only; `test_catalogue_grounding.py` compares every rendered value back to its source record and asserts its own non-vacuity, and a live run confirmed all 16 catalogue values byte-identical to `listings.json`. **Residual**: the chat narration is still model-authored prose, and while `narration_brief` forbids any number not printed in the brief, that constraint is prompt-enforced rather than structural — the *grounded* channel is the catalogue. T029/T046 measure the prose. Previously recorded as: PARTIAL (materially advanced in M3 Phase C) — listing data now reaches the user, and it is grounded end to end: the search query is built from persisted interview state rather than from the model (`agent/research.py`), ranking is deterministic Python over the tool artifact (`agent/ranking.py`), and the verbatim records are persisted in `SessionState.candidate_listings`. Verified live: four recommended listings byte-identical to `listings.json` on price/year/mileage/category, and all 11 numbers in the model's narration traceable to the slate. Still PARTIAL because the **A2UI surface** is the part the principle names and that is T026/T022 (Phase D) — today the values reach the user as chat prose |
-| II. Explicit Phase Gating | Transactional tools unavailable outside their phase | PASS (since M2.5) — `TOOLS_BY_PHASE` in `agent/state.py` is the single gate definition, and `agent/graph.py` builds one agent per phase from it; covered by `test_phase_gate.py` |
+| II. Explicit Phase Gating | Transactional tools unavailable outside their phase | PASS (since M2.5, completed M3 Phase E) — `TOOLS_BY_PHASE` in `agent/state.py` is the single gate definition and `agent/graph.py` builds one agent per phase from it. **All three phase transitions are now code paths in `SessionState`** (`save_interview_slots`, `record_research`, `select_listing`), none of them a model decision. Phase E closed the last hole: `select_listing` had been *named* by the gate since M2.5 with nothing implementing it, so Principle II's own worked example — `open_booking_form` gated on a listing being selected — had no precondition anything could satisfy. Covered by `test_phase_gate.py`, `test_mcp_wiring.py`, `test_select_listing.py`. **Caveat**: `FORM_FILLING` is now reachable but its tools land in M4a |
 | III. Mock-Only Transactions | No real payment path exists | PENDING — nothing to enforce yet; `confirm_mock_payment` lands in M4b |
 | IV. Untrusted Data Boundary | Listing/user text never treated as instructions | PARTIAL (improved in M3 Phase B) — the *rule* is in every listing-facing prompt (`agent/prompts.py`), and the delimiters it refers to are now genuinely emitted: `store.wrap_untrusted()` wraps each `description` server-side, at the tool-output boundary, before it can reach the model. Confirmed live that the `ADV-0001` payload arrives inside the delimiters via `langchain-mcp-adapters`. Still PARTIAL because what remains is the **behavioural** proof — T029 must show the three `ADV-*` probes cause zero deviation. A wrapper the model ignores is not a boundary |
 | V. Full Observability | Every call/transition traced | PASS (since M2.5) — `setup_observability()` is called from the FastAPI lifespan before any agent is built; covered by `test_observability_wiring.py` + `test_otel_setup.py` |
@@ -185,6 +185,30 @@ Fourth lesson, then: **staleness is a two-sided failure.** "Verify the docs
 against the code" has to include verifying that a doc is not still
 describing a limitation the code has since outgrown, because that costs a
 session re-solving a solved problem.
+
+### Correction (M3 Phase E / pre-Phase-E audit)
+
+A fifth audit, run before Phase E. **This one found the docs accurate and
+the code defective** — the inverse of every prior round, and worth recording
+because a reader primed to distrust the docs would have looked in the wrong
+place.
+
+- **Tracing was on the request critical path.** `phoenix.otel.register`
+  defaults to `batch=False`, i.e. a `SimpleSpanProcessor` that exports every
+  span synchronously. Principle V's row said tracing was wired and fail-soft,
+  and it was — at *registration*. At *export* it blocked the agent turn until
+  the collector answered, so a slow Phoenix would have stalled the demo. One
+  keyword (`batch=True`) fixed it; a cold `pytest` went 105s → 4.2s. Nothing
+  was wrong with the project's code; the library default was wrong for it.
+- **Row II's remediation left a decoy behind.** `SessionState.available_tools()`
+  still has zero production callers. M2.5 fixed the *principle* by building
+  `TOOLS_BY_PHASE` + `tools_for_phase`, but the method that the M2.5 finding
+  actually named was never wired up and is still tested by 9 assertions,
+  which makes it read as load-bearing. Re-documented, not deleted.
+
+Fifth lesson: **a defect can hide in a default**, and "the docs are wrong" is
+only one of the failure modes. The constant across all five audits is not
+that documentation drifts — it is that **nobody ran the thing**.
 
 Known deviation, accepted: `create_deep_agent` always installs
 `FilesystemMiddleware`, which binds nine built-in tools (`ls`, `read_file`,

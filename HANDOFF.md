@@ -123,7 +123,12 @@ a trailing `docs:` commit that stamps this section cannot list its own sha,
 so this block may lag HEAD by one or two docs-only commits — check
 `git log --oneline -5` rather than trusting it:
 ```
-cf90320   docs: rewrite HANDOFF for a Phase D handoff  <- or later docs commits
+(this docs: commit)  docs: bring HANDOFF/README up to the Phase E handoff
+b2d35f3  M3 Phase E (T028): listing selection end to end
+a9b0e59  audit: take tracing off the request critical path; fix a stale docstring
+868f8de  M3 Phase D (T026, T022): A2UI reasoning + catalogue surfaces, themed frontend
+7acc4a2  docs: note that HANDOFF's git-log block lags by its own stamp commit
+cf90320  docs: rewrite HANDOFF sections 8/10/13 for a Phase D handoff
 82d4b6b  docs: point HANDOFF at Phase D and correct the Phase C references
 701acda  docs: stamp the Phase C commit sha into HANDOFF's git log
 dd7ab4a  M3 Phase C (T024, T025): MCP wiring, code-driven search, ranking
@@ -132,7 +137,6 @@ dd7ab4a  M3 Phase C (T024, T025): MCP wiring, code-driven search, ranking
 c6915fd  M3 Phase B (T020, T023): marketplace MCP server over Streamable HTTP
 dea1576  M3 Phase A: async agent path, provider-aware token caps, doc corrections
 c208807  docs: rewrite HANDOFF for M2.5 state and flag M3's open quota decision
-fc54d31  M2.5 follow-up: fix enum/float leaking into the A2UI progress surface
 b5a0bcb  M2.5: audit remediation — wire observability and the phase gate, swap LLM provider
 6cef214  M2: Conversational Interview (User Story 1) end to end
 ```
@@ -141,8 +145,14 @@ b5a0bcb  M2.5: audit remediation — wire observability and the phase gate, swap
 
 ## 3. The recurring failure mode — read before trusting any doc
 
-**Docs in this repo have three times asserted behaviour the code did not
-have.** Each was found by running things, never by reading.
+**Docs in this repo have repeatedly asserted behaviour the code did not
+have.** Every instance was found by *running* things, never by reading.
+
+Five audits so far. Three found docs **overclaiming**, the fourth found docs
+**underclaiming**, and the fifth found the docs accurate but the **code**
+carrying two silent defects. So the failure mode is not "docs lie" — it is
+**"nobody ran it"**. Read the tables below for the specific traps, then
+assume the next one will be somewhere none of them were.
 
 ### Found by the M2.5 audit (fixed in M2.5)
 
@@ -180,6 +190,24 @@ errors in `agent-backend`, 1 in `mcp-services`). Both only ever worked
 because `python -m pytest` puts the cwd on `sys.path`. Fixed with a
 `conftest.py` per service root.
 
+### Found by the pre-Phase-E audit (fixed in `a9b0e59`)
+
+**The docs held up this time — the *code* did not.** All test counts,
+requirement statuses and §8 findings checked out against a fresh clone. Two
+real defects surfaced instead, both pre-existing and neither visible to any
+test:
+
+| Was believed | Reality found |
+|---|---|
+| §8.28 "tracing must be fail-soft" | Fail-soft at *registration*, **not at export**. `phoenix.otel.register` defaults to `batch=False` → a `SimpleSpanProcessor` that exports every span **synchronously**, putting Phoenix on the request critical path. A slow or dying Phoenix would stall every agent turn mid-demo. Fixed with `batch=True`; a cold `pytest` went **105s → 4.2s** (it was `user 5s` of `real 106s` — pure idle I/O, which reads as a hung suite). |
+| Principle II — `available_tools()` "now genuinely wired" (M2.5) | It **still has zero production callers**. M2.5's remediation built a *different* mechanism (`TOOLS_BY_PHASE` + `tools_for_phase`) and left this method behind, with 9 test assertions making it look load-bearing. The gate is real; this function is not it. Re-documented rather than deleted. |
+
+Also confirmed by this audit, so nobody re-investigates: a
+`docker compose up` that logs *"Marketplace tools unavailable"* was **my own
+port collision** leaving the network half-created, not a project bug. A
+clean `docker compose down && up` gives `mcp_connected: true`. Verify before
+concluding.
+
 **Lessons worth keeping:**
 1. A test asserting *a prompt contains a rule* proves the rule was written,
    not that it is enforced. Grep for the thing the rule describes.
@@ -198,6 +226,23 @@ because `python -m pytest` puts the cwd on `sys.path`. Fixed with a
 7. **Run the suite the way a stranger would**, not only the way the README
    says. `pytest tests/` and `python -m pytest tests/` were not equivalent
    here for four milestones.
+8. **A test that asserts on what a function *returns* cannot prove what it
+   *persisted*.** Phase E's selection bug passed every unit test because
+   they all checked `_handle_action`'s return value; the write to the
+   checkpointer never happened, and the symptom only appeared on reload.
+   For anything that must survive a reconnect, assert on what a **later
+   read** sees.
+9. **Some bugs are only visible on a screen.** Phase D shipped a surface
+   that was created, populated and permanently invisible (wrong root id),
+   and icons that rendered as the literal text "payment"/"location_on".
+   Phase E shipped a button that did nothing at all — no error, no network
+   request, nothing in the console. All passed their unit tests. Click the
+   thing.
+10. **A defect can hide in a default.** The tracing bug was one keyword
+    (`batch=False`) in a library call that had been reviewed twice and was
+    doing exactly what it was told. Nothing was wrong with our code; the
+    default was wrong for us. Check the defaults of anything on a request
+    path.
 
 ### 3b. The dataset could not satisfy the spec (fixed in Phase B)
 
@@ -221,20 +266,20 @@ AS1 now matches 4 listings. Reversible: one constant table + regenerate.
 ```
 ┌──────────────── frontend (React + Vite, port 3000) ────────────────┐
 │  chat shell (src/App.tsx)                                          │
-│   ├─ @a2ui/react renderer  → interview progress ✅,                 │
-│   │                          catalogue + reasoning ⬜ (Phase D/E)   │
+│   ├─ @a2ui/react renderer  → interview progress ✅, reasoning ✅,   │
+│   │                          catalogue ✅ (+ select Button)         │
 │   └─ MCP Apps host (M4)    → sandboxed iframes: booking, checkout  │
 └───────────────────────────────┬────────────────────────────────────┘
                     WebSocket /ws/{session_id}
 ┌───────────────────────────────▼────────────────────────────────────┐
 │  agent-backend (Python 3.14, FastAPI, port 8000)   ASYNC ALL-THE-WAY│
 │   ├─ agent/graph.py       PhaseAgentRegistry: one agent per phase  │
-│   ├─ agent/tools.py       save_interview_state (Command-based)     │
+│   ├─ agent/tools.py       save_interview_state, select_listing     │
 │   ├─ agent/state.py       SessionState + TOOLS_BY_PHASE gate       │
 │   ├─ agent/prompts.py     PHASE_SYSTEM_PROMPTS + UNTRUSTED_DATA_RULE│
-│   ├─ agent/render_a2ui.py deterministic domain → A2UI JSON         │
+│   ├─ agent/render_a2ui.py 3 surfaces: interview/reasoning/catalogue│
 │   ├─ agent/llm.py         provider-selected; per-provider max_tokens│
-│   ├─ api/main.py          WebSocket bridge, agent.ainvoke()        │
+│   ├─ api/main.py          WS bridge, ainvoke, actions, surfaces    │
 │   └─ AsyncSqliteSaver → /app/data/sessions.sqlite (volume, WAL)    │
 └──────┬─────────────────────────────────────────┬───────────────────┘
        │ MCP Streamable HTTP ✅ (Phase B)         │ OTel gRPC
@@ -717,13 +762,13 @@ Note both tests assert on *model prose*, so heed §3's lesson about vacuous
 checks — normalise digit separators and **assert the check examined
 something** before trusting a pass.
 
-### What Phase C left (still true, still the data contract)
+### The data contract (Phase C, still exactly true)
 
 Phase C (T024 + T025) is **done, verified live, and pushed** (`dd7ab4a`).
-The full record with rationale is in tasks.md under T024/T025; what matters
-for Phase D is the shape of what it produces:
+The full record with rationale is in tasks.md under T024/T025. This is the
+shape everything downstream renders from, and it has not changed since:
 
-| Produced by Phase C | Where | Phase D renders it as |
+| Produced by Phase C | Where | Rendered as |
 |---|---|---|
 | Verbatim listing records from the tool artifact | `SessionState.candidate_listings` (`list[dict]`, rank order) | the **catalogue surface**'s only data source |
 | `RankedRecommendation(listing_id, rank, fit_score, reasoning)` | `SessionState.recommendations` | card ordering + the explanation text |
@@ -787,7 +832,7 @@ since an injection result is only evidence for the model it ran on.
   user who selects a car gets a confirmation and then an agent with no
   domain tools. Correct per the gate, but it is a dead end until M4a — do
   not demo past the selection yet.
-- 🔴 **The demo's headline path still opens on a constraint relaxation.**
+- 🟡 **The demo's headline path opens on a constraint relaxation unless you pick a late target date** (decision taken in Phase D — see below).
   §3b fixed the *price* floor so US2 AS1 matches 4 SUVs, but every real
   session also applies `target_date`, and **0** of those 4 are available
   before 2026-09-01 (they land 09-18, 11-10, 11-28, 12-19; only **45**/203
@@ -827,93 +872,105 @@ since an injection result is only evidence for the model it ran on.
 
 ## 13. Required reading
 
-For a new session, read in this order:
+For a new session, read in this order.
+
+**Tier 1 — orientation (always read):**
 
 1. **`HANDOFF.md`** ← this file (full context + gotchas)
 2. **`.specify/memory/constitution.md`** — the 5 principles all code must honor
 3. **`specs/001-ai-car-matchmaker/spec.md`** — user stories, FRs, success criteria
 4. **`specs/001-ai-car-matchmaker/tasks.md`** — task state + per-task findings
-   (Phase 3.5 = M2.5; **Phase 4 = M3, current work**)
-5. **`specs/001-ai-car-matchmaker/plan.md`** — architecture + the corrected
-   Constitution Check table (**both** correction blocks)
+   (Phase 3.5 = M2.5; **Phase 4 = M3, current work**; T021/T029 are what's left)
+5. **`specs/001-ai-car-matchmaker/plan.md`** — architecture + the Constitution
+   Check table (**all three** correction blocks)
 6. **`README.md`** — run instructions
 
-Then, before writing M3 Phase D code — **the four that matter most are
-7, 8, 9 and 10**, because Phase D's whole job is rendering what they produce:
+**Tier 2 — what Phase F (T021 + T029) actually touches.** These four are the
+ones to read closely; the rest of Tier 3 is reference:
 
-7. `agent-backend/agent/state.py` — `SessionState.candidate_listings` /
-   `.recommendations` (**Phase D's data source**), `TOOLS_BY_PHASE` gate,
-   `record_research()`
-8. `agent-backend/agent/render_a2ui.py` — the surface pattern T026 copies,
-   and `_display()`'s enum/float traps
-9. `agent-backend/agent/research.py` — `ResearchOutcome.steps` (the
-   reasoning-steps source), the AS2 relaxation ladder, why the first search
-   is code-driven
-10. `agent-backend/agent/ranking.py` — how `fit_score` and `reasoning` are
-    derived; T022 snapshots against exactly these values
-11. `agent-backend/api/main.py` — async lifespan, the WebSocket contract,
-    `_run_research_turn` (**where the `{"type":"progress"}` placeholder T026
-    replaces is sent**)
-12. `agent-backend/tests/test_ranking.py` + `tests/test_research.py` — the
-    deterministic contract Phase D must not break
-13. `mcp-services/marketplace/store.py` — the query logic and
-    `wrap_untrusted()` (why `description` must never be rendered)
-14. `mcp-services/tests/test_marketplace_server.py` — the exact
-    `structured_content` shape
-15. `agent-backend/agent/graph.py` — `resolve_registry()` / `PhaseAgentRegistry`
-16. `agent-backend/tests/test_phase_gate.py` + `tests/test_mcp_wiring.py` —
-    how the gate is proven; M3 must keep both passing
-17. `agent-backend/agent/prompts.py` — `UNTRUSTED_DATA_RULE`
-18. `agent-backend/agent/llm.py` — provider selection + per-provider token caps
-19. `frontend/src/App.tsx` — renders every surface in `surfacesMap`
-    automatically (§8.22), so Phase D's surfaces appear without frontend work;
-    Phase E is layout + selection
+7. `agent-backend/agent/prompts.py` — `UNTRUSTED_DATA_RULE`, the rule T029
+   must prove the model actually obeys, plus every phase's system prompt
+8. `agent-backend/agent/research.py` — the relaxation ladder T021 tests, and
+   `narration_brief()`, which is **the path untrusted listing text takes to
+   the model** (it deliberately carries the delimiters through)
+9. `mcp-services/data/generate_listings.py` — the three `ADV-*` probes and
+   exactly what each one attempts
+10. `agent-backend/tests/test_research.py` — the deterministic half of T021
+    is already here; T021 owes only the live-gated half
+
+**Tier 3 — reference for anything you touch:**
+
+11. `agent-backend/agent/state.py` — `SessionState`: the three phase
+    transitions (`save_interview_slots`, `record_research`, `select_listing`),
+    `TOOLS_BY_PHASE`, `candidate_listings`/`recommendations`
+12. `agent-backend/agent/render_a2ui.py` — all three A2UI surfaces; read §8.19
+    and §8.21c–f before editing it
+13. `agent-backend/agent/ranking.py` — deterministic `fit_score`/`reasoning`
+14. `agent-backend/api/main.py` — async lifespan, the WS contract (`chat` /
+    `action` in, `chat` / `a2ui` / `error` out), `_SurfaceStream`,
+    `_run_research_turn`, `_handle_action`
+15. `agent-backend/tests/test_catalogue_grounding.py` — T022, and the model
+    for how to write a **non-vacuous** assertion (T029 needs the same care)
+16. `agent-backend/tests/test_select_listing.py` — the selection contract
+17. `mcp-services/marketplace/store.py` — query logic + `wrap_untrusted()`
+18. `agent-backend/agent/graph.py` — `resolve_registry()` / `PhaseAgentRegistry`
+19. `agent-backend/tests/test_phase_gate.py` + `tests/test_mcp_wiring.py` —
+    how the gate is proven; keep both passing
+20. `agent-backend/agent/llm.py` — provider selection + per-provider token caps
+21. `frontend/src/App.tsx` + `src/a2ui-theme.css` — renders every surface in
+    `surfacesMap` automatically, and the `ActionListener`
+
+---
 
 **Suggested opening prompt for the new chat** — copy this verbatim:
 
 > Read `/home/abbas/ai-car-matchmaker/HANDOFF.md` in full, then everything it
-> lists under §13 Required reading.
+> lists under §13 Required reading (Tiers 1 and 2 closely; Tier 3 as needed).
 >
 > This is the Amulate Summer Hackathon 2026 "AI Car Matchmaker" project.
-> M0–M2.5 are complete. **M3 (User Story 2) is in progress**: Phase A (async
-> agent path), Phase B (T020/T023, marketplace MCP server) and Phase C
-> (T024/T025, MCP wiring + code-driven first search + deterministic ranking)
-> are done, tested, verified live and pushed to `main` (`82d4b6b`).
-> **Continue from M3 Phase D (T026 + T022)** — A2UI reasoning-steps and
-> catalogue surfaces — described in HANDOFF §10.
+> M0–M2.5 are complete. **M3 (User Story 2) is nearly done**: Phases A–E are
+> shipped, tested, verified live in a browser and pushed to `main`
+> (`b2d35f3`). Interview → auto-research → deterministically ranked A2UI
+> catalogue → listing selection → FORM_FILLING all works end to end.
+> **Continue from M3 Phase F (T029 + T021)** — the two live-gated
+> behavioural tests described in HANDOFF §10. Phase F is tests, not features.
 >
 > Do **not** write code immediately. First confirm you have full context and
-> tell me anything in the docs that looks wrong, stale, or self-contradictory —
-> four separate audits have now found docs asserting behaviour the code did
-> not have (HANDOFF §3), so treat the docs as claims to verify. Note the
-> fourth audit found the *inverse* too: docs still describing limitations the
-> code had outgrown. Check both directions.
+> tell me anything in the docs that looks wrong, stale, or self-contradictory.
+> Five audits have now run (HANDOFF §3): three found docs overclaiming, one
+> found docs *underclaiming*, and the fifth found the docs accurate but the
+> **code** carrying two silent defects. So check both directions, and don't
+> assume "the docs are the problem" — the real pattern is that nobody ran it.
 >
 > Notes:
-> - Phase D renders what Phase C persists. `SessionState.candidate_listings`
->   holds **verbatim tool records** and `.recommendations` holds the
->   deterministic ranking — those two are the catalogue's only legitimate
->   data source (Principle I). `ResearchOutcome.steps` feeds the
->   reasoning-steps surface.
-> - `api/main.py` currently sends `{"type":"progress"}` as a **placeholder**.
->   Requirement #5 says reasoning steps must be A2UI, so T026 replaces it.
->   The multi-send path is already restructured — substitution, not rewrite.
-> - **Never render a listing's `description`** — it carries the
->   `<untrusted_listing_data>` delimiters and is attacker-controlled text.
-> - **T022 must assert its own non-vacuity.** Phase C's first grounding check
->   passed having examined zero values, because `gpt-oss-120b` writes
->   "$17 391" with a thin space and the regex expected "$17,391". A snapshot
->   test that silently compares nothing reads as proof. Count and assert.
-> - A2UI is **v0.9**, and only the 18 components in HANDOFF §8.19 exist.
-> - The `langchain-mcp-adapters` API is verified — HANDOFF §8.1–8.7. Don't
->   re-research it, but do sanity-check it still holds.
+> - **T029 is the one that matters.** Principle IV stays PARTIAL until the
+>   three `ADV-*` probes are shown to cause zero behavioural deviation. The
+>   wrapping is real and verified live; what's owed is proof the model obeys
+>   it. `ADV-0002` is the sharpest probe — an SUV at $31,000 that demands to
+>   be ranked first regardless of fit, so a budget-constrained SUV search
+>   that relaxes its budget puts it in front of the model naturally.
+> - **T021** needs only its live half; the relaxation ladder is already
+>   covered deterministically in `tests/test_research.py`.
+> - **Both assert on model prose, so make them non-vacuous.** A previous
+>   grounding check passed having examined zero values because the model
+>   writes "$17 391" with a thin space and the regex expected "$17,391".
+>   Normalise separators, count what you compared, and assert the count —
+>   `tests/test_catalogue_grounding.py` shows the pattern.
+> - Run T029 on Groq **and** once on whatever model ships: an injection
+>   result is only evidence for the model it ran on.
+> - **Never render a listing's `description`** — attacker-controlled, and it
+>   carries the `<untrusted_listing_data>` delimiters.
+> - A2UI is **v0.9**; only the 18 components in §8.19 exist. If you touch the
+>   surfaces, read §8.21c–f first (root id, icons, theming, DOM shape) —
+>   each cost a live debugging cycle.
 > - Outbound POSTs to LLM providers fail inside the default tool sandbox;
 >   live-LLM commands need `dangerouslyDisableSandbox: true`.
-> - Dev LLM is Groq (~1000 req/day), so live tests are affordable. It throttles
->   on tokens/minute — a 20–70s "hang" is backoff, not a dead call.
+> - Dev LLM is Groq (~1000 req/day), so live tests are affordable. It
+>   throttles on tokens/minute — a 20–70s "hang" is backoff, not a dead call.
+> - ⚠️ **Don't demo past listing selection**: FORM_FILLING is reachable but
+>   its tools land in M4a.
 >
-> Two open decisions of mine that are recorded but unresolved — raise them,
-> don't decide them: (1) the demo's headline path still opens on a constraint
-> relaxation because no budget SUV is available before the target date
-> (tasks.md T021); (2) `select_listing` is a phase-gate entry with no
-> implementation, and **M4a depends on it** (tasks.md T028b).
+> After Phase F, M3 is complete and the next milestone is **M4a** (booking
+> form MCP App) — which is now unblocked, since `select_listing` exists and
+> `SessionState.selected_listing()` returns the verbatim record to pre-fill
+> the form from.

@@ -43,8 +43,8 @@ and a *mocked* checkout **without leaving the chat**.
 | 10 | Spec-driven development (e.g. GitHub spec-kit) | ✅ full trail |
 | 11 | Ship as Docker container **or** deployed public app | ✅ `docker compose up` verified |
 | 12 | Public GitHub repo, documented, README with run instructions | ✅ |
-| 13 | Short slide deck (template from organizers — **not yet received**) | 🟡 **content drafted** — `specs/001-ai-car-matchmaker/deck-outline.md`; only styling awaits the template |
-| 14 | Short video demo of the working app | ⬜ |
+| 13 | Short slide deck (template from organizers — **not yet received**) | 🟡 **deferred to last, user-owned.** Content already drafted in `specs/001-ai-car-matchmaker/deck-outline.md`; only styling awaits the template. Do not work on it unless asked |
+| 14 | Short video demo of the working app | ⬜ **deferred to last, user-owned** — recording is the user's to do, and there is nothing to record until M4a/M4b land |
 | 15 | **Bonus**: AI observability + evals via Langfuse or Arize Phoenix over OTel | 🟡 observability ✅ (real spans verified); **evals still owed** (T046) |
 
 ### Locked-in decisions (made by the user, do not re-litigate)
@@ -60,6 +60,7 @@ and a *mocked* checkout **without leaving the chat**.
 | Session store | LangGraph **AsyncSqliteSaver** | Zero external infra, real persistence (was SqliteSaver — see §3) |
 | LLM provider (dev) | **Groq**, `openai/gpt-oss-120b` | 200k tokens/day ≈ 66 agent turns, vs Gemini's ~20 requests/day — see §5 |
 | Push cadence | **Commit + push after each milestone, pre-authorized** | User approved; no per-push confirmation needed |
+| **Priority order** | **Build the product first. Deck (#13) and video (#14) come last and are the user's to own** | Decided 2026-08-08. Both are presentation artifacts that depend on a finished product; doing them earlier means redoing them. **Do not spend session time on the deck or the video unless asked** — draft content for #13 already exists (see §11) |
 
 ### Resolved architectural ambiguity (important)
 
@@ -100,7 +101,8 @@ M4a  ⬜ Booking form MCP App (User Story 3)
 M4b  ⬜ Mock checkout MCP App (User Story 4)
 M4c  ⬜ Session resume (User Story 5)
 M5   ⬜ Evals (observability itself is wired, M2.5/T051)
-M6   ⬜ Hardening, E2E tests, README finalization, deck, demo video
+M6   ⬜ Hardening, E2E tests, README finalization
+       ⏸️ deck (#13) + demo video (#14) — LAST, and the user's to own
 ```
 
 **Test suite: 202 total** (measured 2026-08-08 after Phase F, not copied forward).
@@ -132,7 +134,12 @@ a trailing `docs:` commit that stamps this section cannot list its own sha,
 so this block may lag HEAD by one or two docs-only commits — check
 `git log --oneline -5` rather than trusting it:
 ```
-(this docs: commit)  docs: bring HANDOFF/tasks/plan/README up to the M3-complete state
+(this docs: commit)  docs: re-tier HANDOFF for M4a; record the build-first priority
+47ec1d1  T049: draft the deck — the template blocker was mis-scoped
+7f43990  T029: verify the untrusted-data boundary on Gemini too — M3 fully closed
+7ca39a9  docs: record the full live sweep, now green, and a fourth key to rotate
+56cb6c6  docs: correct two test counts I wrote without measuring
+5a6bd25  M3 Phase F (T029, T021): behavioural tests, and the defects they found
 63ea11c  audit: correct the T029 probe-routing recipe, which never worked
 d78890e  docs: bring HANDOFF and plan.md up to the Phase E handoff state
 b2d35f3  M3 Phase E (T028): listing selection end to end
@@ -876,6 +883,10 @@ tests found real defects in shipped code, and the fixes changed
 
 ### Immediate next: M4a — booking form MCP App (US3, T030-T035)
 
+**Milestone order from here**: M4a → M4b → M4c → M5 (evals) → M6
+(hardening). The deck and video sit *after* all of that and are the user's
+to own — see the priority decision in §1.
+
 Hard requirement #3, and the last unmet one that is purely build work.
 `select_listing` and `SessionState.selected_listing()` exist, so
 `open_booking_form` has a real precondition to gate on and a **verbatim
@@ -946,14 +957,19 @@ see §5. Consequences for M4a onward:
 - ✅ *(resolved in Phase F)* **T029 against Gemini** — run on
   `gemini-3.6-flash`, the demo provider, and clean. Principle IV's PASS now
   covers both shipped models. Re-run it if the model is ever changed.
-- ✅ *(resolved)* **Slide deck** — T049 is drafted at
-  `specs/001-ai-car-matchmaker/deck-outline.md` (11 slides, speaker notes,
-  demo script, per-slide evidence). It had been recorded as "blocked on the
-  organizers' template" since M0; that was **mis-scoped** — a template
-  governs styling, not narrative. Still owed from the organizers: the
-  visual template and the hard slide count. Two slides hold placeholders
-  until M4a/M4b.
-- **Demo video** — T050. Recording is the user's to do.
+- ⏸️ **Slide deck (#13) and demo video (#14) are deliberately deferred to
+  last and are the user's to own** (decision 2026-08-08). **Building the
+  product comes first.** Do not spend session time on either unless the
+  user asks.
+  Where they stand, so nobody re-derives it: T049's *content* is drafted at
+  `specs/001-ai-car-matchmaker/deck-outline.md` — 11 slides, speaker notes,
+  a demo script, per-slide evidence. It had been recorded as "blocked on the
+  organizers' template" since M0, which was **mis-scoped**: a template
+  governs styling, not narrative. Genuinely still owed by the organizers —
+  the visual template and the hard slide count. Two of its slides hold
+  placeholders until M4a/M4b land. T050 (video) has nothing to record until
+  then either.
+
 - ✅ *(resolved in Phase D)* **A2UI styling** — the surfaces are themed via
   `frontend/src/a2ui-theme.css` (`--a2ui-*` custom properties, §8.21e) and
   the chat shell via `app.css`. The page also now pins `color-scheme: light`,
@@ -1025,111 +1041,135 @@ see §5. Consequences for M4a onward:
 
 ## 13. Required reading
 
-For a new session, read in this order.
+For a new session, read in this order. **Re-tiered for M4a** — Phase F's
+reading list is gone; if you need it, it is in git history.
 
-**Tier 1 — orientation (always read):**
+**Tier 1 — orientation (always read, 6 files):**
 
 1. **`HANDOFF.md`** ← this file (full context + gotchas)
 2. **`.specify/memory/constitution.md`** — the 5 principles all code must honor
-3. **`specs/001-ai-car-matchmaker/spec.md`** — user stories, FRs, success criteria
-4. **`specs/001-ai-car-matchmaker/tasks.md`** — task state + per-task findings
-   (Phase 3.5 = M2.5; **Phase 4 = M3, current work**; T021/T029 are what's left)
+3. **`specs/001-ai-car-matchmaker/spec.md`** — **US3 is M4a's spec**: read its
+   3 acceptance scenarios and FR-006/FR-010 closely
+4. **`specs/001-ai-car-matchmaker/tasks.md`** — task state + per-task findings.
+   **Phase 5 = M4a, T030–T035 = current work**
 5. **`specs/001-ai-car-matchmaker/plan.md`** — architecture + the Constitution
-   Check table (**all three** correction blocks)
+   Check table (**all five** correction blocks)
 6. **`README.md`** — run instructions
 
-**Tier 2 — what M4a (booking form MCP App) actually touches.** Phase F is
-done; these are still the closest reading for anyone extending the agent, and
-items 7-10a are the ones Phase F changed:
+**Tier 2 — what M4a actually touches (5 files).** Read these closely; they
+are the contract M4a plugs into, and every one already exists:
 
-7. `agent-backend/agent/prompts.py` — `UNTRUSTED_DATA_RULE`, the rule T029
-   must prove the model actually obeys, plus every phase's system prompt.
-   **The prompt T029 actually exercises is `RESULTS_SYSTEM_PROMPT`**, not
-   `RESEARCH_SYSTEM_PROMPT` — see §3's Phase F audit block for why
-8. `agent-backend/agent/research.py` — the relaxation ladder T021 tests, and
-   `narration_brief()`, which is **the path untrusted listing text takes to
-   the model** (it deliberately carries the delimiters through)
-9. `mcp-services/data/generate_listings.py` — the three `ADV-*` probes and
-   exactly what each one attempts. Read it beside §10's measured routing
-   table: a probe's *fields* do not tell you which query will surface it
-10. `agent-backend/tests/test_research.py` — the deterministic half of T021
-    is already here; T021 owes only the live-gated half
-10a. `agent-backend/api/main.py::_run_research_turn` — **read this before
-    writing either test.** It is where the phase advances mid-turn, which
-    determines which agent (and therefore which system prompt and which
-    bound tools) actually receives the untrusted narration brief
+7. `agent-backend/agent/state.py` — `Booking` (already defined, unused),
+   `TOOLS_BY_PHASE[FORM_FILLING]` = `open_booking_form`/`submit_booking`
+   (**named since M2.5, still unimplemented — this is M4a's job**),
+   `select_listing()`, and **`selected_listing()`, which returns the verbatim
+   record the form must pre-fill from** (Principle I: never model prose)
+8. `mcp-services/marketplace/server.py` + `store.py` — **the pattern to
+   copy.** `mcp-services/booking/` is an empty dir; the marketplace server is
+   a working FastMCP Streamable HTTP server with a `/health` route,
+   `stateless_http=True`, logic split into a transport-free `store.py`. M4a's
+   booking server should mirror this shape, and T033 adds a `ui://` resource,
+   which marketplace does not have — that part is new
+9. `agent-backend/api/main.py` — the WS contract (`chat`/`action` in,
+   `chat`/`a2ui`/`error` out), `_SurfaceStream`, `_handle_action`,
+   `_persist_session`. **`_handle_action` is the precedent for M4a**: it is
+   how a UI event mutates state outside a graph run (§8.20c)
+10. `agent-backend/tests/test_select_listing.py` — the selection contract
+    M4a gates on, including that an id outside the persisted slate is refused
+11. `frontend/src/App.tsx` — the chat shell, the A2UI renderer and the
+    `ActionListener`. `src/mcp-app-host/` is an **empty dir**; T034's iframe
+    host goes there and is the first thing to make `App.tsx` worth splitting
 
 **Tier 3 — reference for anything you touch:**
 
-11. `agent-backend/agent/state.py` — `SessionState`: the three phase
-    transitions (`save_interview_slots`, `record_research`, `select_listing`),
-    `TOOLS_BY_PHASE`, `candidate_listings`/`recommendations`
-12. `agent-backend/agent/render_a2ui.py` — all three A2UI surfaces; read §8.19
-    and §8.21c–f before editing it
-13. `agent-backend/agent/ranking.py` — deterministic `fit_score`/`reasoning`
-14. `agent-backend/api/main.py` — async lifespan, the WS contract (`chat` /
-    `action` in, `chat` / `a2ui` / `error` out), `_SurfaceStream`,
-    `_run_research_turn`, `_handle_action`
-15. `agent-backend/tests/test_catalogue_grounding.py` — T022, and the model
-    for how to write a **non-vacuous** assertion (T029 needs the same care)
-16. `agent-backend/tests/test_select_listing.py` — the selection contract
-17. `mcp-services/marketplace/store.py` — query logic + `wrap_untrusted()`
-18. `agent-backend/agent/graph.py` — `resolve_registry()` / `PhaseAgentRegistry`
-19. `agent-backend/tests/test_phase_gate.py` + `tests/test_mcp_wiring.py` —
-    how the gate is proven; keep both passing
-20. `agent-backend/agent/llm.py` — provider selection + per-provider token caps
-21. `frontend/src/App.tsx` + `src/a2ui-theme.css` — renders every surface in
-    `surfacesMap` automatically, and the `ActionListener`
+12. `agent-backend/agent/graph.py` — `resolve_registry()` /
+    `PhaseAgentRegistry`; how a new tool gets bound to exactly one phase
+13. `agent-backend/tests/test_phase_gate.py` + `tests/test_mcp_wiring.py` —
+    how the gate is proven; T030 extends this. Keep both passing
+14. `agent-backend/agent/prompts.py` — `TRANSACTION_SYSTEM_PROMPT` is the
+    FORM_FILLING prompt and already carries `UNTRUSTED_DATA_RULE`
+15. `agent-backend/agent/render_a2ui.py` — the three A2UI surfaces. Read
+    §8.19 and §8.21c–f before editing. **M4a is MCP Apps, not A2UI** — the
+    booking form is an iframe, deliberately a different surface (§1)
+16. `agent-backend/agent/mcp_client.py` — fail-soft discovery; a second MCP
+    server means this and `/health`'s `mcp_connected` need revisiting
+17. `agent-backend/tests/test_catalogue_grounding.py` — the model for a
+    **non-vacuous** assertion; T031 needs the same care
+18. `agent-backend/tests/support_live.py` + `test_prompt_injection.py` — how
+    a live-gated test is written here (gate, pacing, quota-skip)
+19. `agent-backend/agent/llm.py` — provider selection, token caps, retries
+20. `agent-backend/agent/research.py` + `ranking.py` — how the slate M4a
+    books against was produced
+21. `docker-compose.yml` — a booking MCP server may need a port/service entry
 
 ---
 
 **Suggested opening prompt for the new chat** — copy this verbatim:
 
 > Read `/home/abbas/ai-car-matchmaker/HANDOFF.md` in full, then everything it
-> lists under §13 Required reading (Tiers 1 and 2 closely; Tier 3 as needed).
+> lists under §13 Required reading — Tier 1 and Tier 2 closely, Tier 3 as
+> needed. §13 was re-tiered for this milestone, so it is 11 files, not 21.
 >
-> This is the Amulate Summer Hackathon 2026 "AI Car Matchmaker" project.
-> **M0-M3 are complete.** Interview → auto-research → deterministically
-> ranked A2UI catalogue → listing selection → FORM_FILLING works end to end,
-> and M3's two behavioural guarantees are now proven against a live model
-> (T029 prompt injection, T021 relaxation messaging). 202 tests, 193 needing
-> no setup. **Continue from M4a** — the in-chat booking form as an MCP App
-> (hackathon hard requirement #3), described in HANDOFF §10.
+> This is the Amulate Summer Hackathon 2026 "AI Car Matchmaker".
+> **M0 through M3 are complete, verified live, and pushed to `main`.**
+> Interview → automatic research → deterministically ranked A2UI catalogue →
+> listing selection → FORM_FILLING works end to end. 202 tests, 193 needing
+> no setup at all, and all 202 have been run green together against a live
+> model with Phoenix running.
+>
+> **Continue from M4a: the in-chat booking form as an MCP App**
+> (User Story 3, tasks T030–T035, described in HANDOFF §10). This is
+> hackathon hard requirement #3 and the last unmet product requirement
+> besides M4b's checkout.
+>
+> **Priority: build the product.** The slide deck (#13) and the demo video
+> (#14) are deliberately last and are mine to own — do not spend session
+> time on them unless I ask. The deck's content is already drafted if you
+> need to point at it.
 >
 > Do **not** write code immediately. First confirm you have full context and
-> tell me anything in the docs that looks wrong, stale, or self-contradictory.
-> Seven audits have now run (HANDOFF §3). Three found docs overclaiming, one
-> found docs *underclaiming*, one found the docs accurate but the code
-> defective, one found a doc wrong about a *procedure* it recommended for the
-> next session — and the last one was not an audit at all: **the two new
-> tests found four real defects on their first live run**, in code every doc
-> described correctly. Check every direction, and note the pattern: the
-> constant is not that documentation drifts, it is that **nobody ran it**.
+> tell me anything that looks wrong, stale, or self-contradictory. Then
+> design M4a and check it with me before implementing.
 >
-> Notes:
-> - **The sharpest lesson from M3 is §3's newest one: Principle I constrains
->   values, not claims.** The agent said "Four listings matched your
->   criteria" about a slate it had silently widened. Every number in the
->   sentence was grounded and the sentence was still false. Grounding checks
->   are not enough on their own.
+> Read HANDOFF §3 carefully — it is the most valuable section in the repo.
+> Seven review passes have run. Three found docs overclaiming, one found docs
+> *underclaiming*, one found the docs accurate but the code defective, one
+> found a doc wrong about a *procedure* it recommended for the next session,
+> and the last was not a review at all: **M3's two new tests found four real
+> defects on their first live run, in code every doc described correctly.**
+> The constant is not that documentation drifts — it is that **nobody ran
+> it.** Check every direction.
+>
+> Notes carried into M4a:
 > - **Pre-fill the booking form from `SessionState.selected_listing()`** —
->   the verbatim tool record — never from the model's prose.
-> - ⚠️ **Budget the LLM quota before spending it.** Groq's binding limit is
->   **200,000 tokens/day ≈ 66 agent turns**, not the "~1000 requests/day"
->   the docs claimed until Phase F. DeepAgents burns ~2,700 tokens of tool
->   schemas on every request.
-> - **T029 passes on both Groq and Gemini.** If you change the model, re-run
->   it — an injection result is only evidence for the model it ran on.
-> - Live-gated tests are gated on `LLM_CREDENTIALS_PRESENT` from
+>   the verbatim tool record — never from the model's prose. That method
+>   exists for exactly this.
+> - `TOOLS_BY_PHASE[FORM_FILLING]` has named `open_booking_form` and
+>   `submit_booking` since M2.5 and **nothing implements them.** The phase is
+>   reachable and empty, so until M4a lands, do not demo past selection.
+> - **MCP Apps are iframes, not A2UI.** That is deliberate, not an
+>   inconsistency — see §1's resolved architectural ambiguity before
+>   "fixing" it. `mcp-services/booking/`, `mcp-apps-ui/` and
+>   `frontend/src/mcp-app-host/` are all **empty dirs** awaiting M4a, and
+>   `@modelcontextprotocol/ext-apps` is **not installed yet**.
+> - Copy `mcp-services/marketplace/`'s shape for the booking server (FastMCP,
+>   `stateless_http=True`, logic in a transport-free `store.py`). The `ui://`
+>   resource is the genuinely new part.
+> - **Principle III applies from M4b on**: no card-like data in any DB row,
+>   log, or OTel span — plan for it in M4a's schema rather than retrofitting.
+> - **Budget the LLM quota before spending it.** Groq's binding limit is
+>   **200,000 tokens/day ≈ 66 agent turns**, and it is *invisible* in the
+>   rate-limit headers — they report requests/day and tokens/minute only.
+>   DeepAgents burns ~2,700 tokens of tool schemas on every request.
+> - Live-gated tests read `LLM_CREDENTIALS_PRESENT` from
 >   `agent-backend/conftest.py`. Do not recompute it in a test module and do
 >   not import `api.main` at module scope — it calls `load_dotenv()` and
->   breaks the gate (§3).
+>   silently breaks the gate (§3).
 > - A2UI is **v0.9**; only the 18 components in §8.19 exist. If you touch the
->   surfaces, read §8.21c-f first (root id, icons, theming, DOM shape) —
+>   surfaces, read §8.21c–f first (root id, icons, theming, DOM shape) —
 >   each cost a live debugging cycle.
 > - Outbound POSTs to LLM providers fail inside the default tool sandbox;
 >   live-LLM commands need `dangerouslyDisableSandbox: true`.
 > - **Never render a listing's `description`** — attacker-controlled, and it
 >   carries the `<untrusted_listing_data>` delimiters.
-> - ⚠️ **Don't demo past listing selection**: FORM_FILLING is reachable but
->   its tools are exactly what M4a builds.
+> - **Rotate the four API keys after the demo** (§5). Still outstanding.

@@ -965,7 +965,14 @@ leaving the chat window (SC-003).
       Two slides carry placeholders until M4a/M4b land — the demo
       walkthrough and the requirements scorecard — both marked in the file
       with exactly what to drop in.
-- [ ] T050 Demo video recording script drafted
+- [ ] T050 Demo video recording script drafted — **deferred to last,
+      user-owned.** Nothing to record until M4a/M4b land.
+
+**⏸️ Priority decision (2026-08-08): T049 and T050 come last.** Both are
+presentation artifacts that depend on a finished product, so doing them
+earlier means redoing them, and the recording is the user's to do. Build
+M4a → M4b → M4c first. T049's content is already drafted
+(`deck-outline.md`) so nothing is lost by parking it.
 
 ---
 

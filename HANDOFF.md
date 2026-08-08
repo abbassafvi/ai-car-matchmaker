@@ -504,6 +504,16 @@ Every one is verified, not assumed.
 21. **`@a2ui/react@0.10.2`'s `"./styles/structural.css"` export is broken** —
     points at a file not in the published package. Import dropped; components
     render unstyled but functional. Styling is an open item (§11).
+21a. **Phase C's reasoning steps ride a placeholder, not A2UI.**
+    `api/main.py` sends `{"type": "progress", "steps": [...]}`. Hard
+    requirement #5 and FR-005 both say reasoning steps must be A2UI, so this
+    is **not shippable as-is** — T026 replaces it. The multi-send path is
+    already restructured, so it is a substitution, not a rewrite.
+21b. **Never render a listing's `description`.** The MCP server wraps it in
+    `<untrusted_listing_data>` for *every* consumer, including the artifact
+    the ranker reads, so binding it to a `Text` component would put the
+    delimiters on screen — and would put attacker-controlled prose in the UI.
+    Render `brand`/`model`/`year`/`price`/specs and the ranker's `reasoning`.
 22. The frontend already renders **all** surfaces in `processor.model.surfacesMap`,
     so extra surfaces appear automatically — Phase E is layout, not plumbing.
 23. `(str, Enum)` members stringify as `TransactionType.BUY`. Use `.value`.
@@ -575,116 +585,56 @@ Full text in `.specify/memory/constitution.md`.
 
 ## 10. NEXT UP: M3 Phase D — start here
 
-> **Phase C (T024 + T025) is DONE and pushed.** What landed, and the
-> decisions taken, are recorded in tasks.md under T024/T025. Summary:
->
-> - `agent/mcp_client.py` — fail-soft discovery in the FastAPI lifespan.
-> - `agent/ranking.py` — deterministic ranker over the tool artifact.
->   Scores are min-max normalised *within the slate*.
-> - `agent/research.py` — **code-driven first search** (the user's
->   decision): the query is built from persisted interview state and the
->   tool is called directly, so no constraint or price round-trips through
->   the model. The model narrates afterwards and keeps its bound tools for
->   follow-ups. Includes the AS2 relaxation ladder
->   (availability → budget +20% → category), which skips no-op steps.
-> - `SessionState.record_research()` — the code-enforced
->   RESEARCHING → RESULTS_READY transition. Advances on zero results,
->   **not** on an error (so a transient outage retries).
-> - `candidate_listings` is now `list[dict]` of verbatim tool records.
-> - `/health` reports `mcp_connected` + `marketplace_tools`, and `status`
->   degrades on either a missing key *or* an unreachable marketplace.
-> - **Tests: 117** (82 agent-backend + 35 mcp-services), 114 with no setup.
->
-> ⚠️ **Two things Phase D must inherit:**
-> 1. `api/main.py` sends `{"type": "progress", "steps": [...]}` as a
->    placeholder. Requirement #5 and FR-005 say reasoning steps must be
->    **A2UI** — T026 replaces it. The multi-send path is already
->    restructured, so this is a substitution, not a rewrite.
-> 2. A grounding check that examines nothing passes. Phase C's first
->    narration check missed every price because `gpt-oss-120b` writes
->    "$17 391" with a thin space — **T022 must assert its own
->    non-vacuity.** See tasks.md T025.
+### What Phase C left you (read this before touching Phase D)
 
-### Previous task (done): T024 + T025
+Phase C (T024 + T025) is **done, verified live, and pushed** (`dd7ab4a`).
+The full record with rationale is in tasks.md under T024/T025; what matters
+for Phase D is the shape of what it produces:
 
-**T024 — wire `langchain-mcp-adapters` into agent-backend.**
-The API is **already verified** (§8.1–8.7) — do not re-research it.
-```python
-from langchain_mcp_adapters.client import MultiServerMCPClient
-client = MultiServerMCPClient({"marketplace": {
-    "transport": "streamable_http",
-    "url": os.environ.get("MCP_MARKETPLACE_URL", "http://localhost:8100/mcp"),
-}})
-tools = await client.get_tools()      # async!
-```
-- Add `langchain-mcp-adapters>=0.3.2,<0.4` **and** `mcp>=1.24,<2` to
-  `agent-backend/requirements.txt` (currently only a TODO comment).
-  It is already installed in `.venv`.
-- `MCP_MARKETPLACE_URL` is already passed by `docker-compose.yml`, and as of
-  now is referenced by **no code at all** — grep confirms it appears only in
-  compose and in docs.
-- Tool discovery is async and happens at startup → fetch once in the FastAPI
-  lifespan, **before** `PhaseAgentRegistry` is constructed (agents fix their
-  tools at construction, finding 13).
-- ⚠️ **Do not mutate the module-level `TOOL_REGISTRY` from the lifespan**,
-  which is what this section used to say. `test_phase_gate.py` asserts
-  against `bound & set(TOOL_REGISTRY)`, so a globally-mutated registry makes
-  that test mean one thing under pytest and another under the app. Pass the
-  discovered tools into `PhaseAgentRegistry.__init__` instead —
-  `TOOLS_BY_PHASE` stays the single gate definition (names), tool
-  *resolution* becomes injectable.
-- Must be **fail-soft** like tracing: mcp-services down should degrade
-  research, not kill the backend. ⚠️ But note `PhaseAgentRegistry` caches
-  agents for the process lifetime, so a discovery failure at startup leaves
-  RESEARCHING permanently toolless even after mcp-services recovers. Needs a
-  rebuild path or a documented "restart required", plus `mcp_connected` in
-  `/health` next to `tracing_enabled`.
-
-**T025 — RESEARCHING behaviour.** Two design decisions already taken:
-- **Ranking is deterministic Python, not the LLM.** A `rank()` function builds
-  `RankedRecommendation(listing_id, rank, fit_score, reasoning)` from the
-  artifact's structured fields. spec.md's own entity definition demands this
-  ("never independently authored by the LLM"). It also keeps prompts small,
-  which matters against Groq's TPM ceiling.
-- **Research must auto-kick-off.** Today the phase flips to RESEARCHING inside
-  the interview turn, but nothing runs until the user sends another message —
-  which contradicts spec.md US1 AS3 ("no further user prompt required to
-  proceed"). Run research in the same turn the interview completes.
-- Hand the MCP tools to the registry (see T024 above); the gate already
-  **names** `search_listings`/`get_listing_details` for `Phase.RESEARCHING`,
-  so `test_phase_gate.py` starts covering them automatically.
-- Consider passing deny-all `permissions=` to `create_deep_agent` (finding
-  12) — re-verified present in deepagents 0.7.5, along with the exported
-  `FilesystemPermission`.
-
-🔴 **Settle this before writing T025 — it is the user's decision, not
-yours.** The RESEARCHING agent **cannot currently see the interview
-constraints**: `build_agent_for_phase` passes a static `system_prompt`, and
-`session` reaches graph state only (visible to tools via `InjectedState`,
-never to the model). But `RESEARCH_SYSTEM_PROMPT` instructs it to "search
-using the captured interview constraints". The only reason it would work is
-that the interview transcript shares the thread — so the model would
-*recall* the budget rather than read it, which is the failure class
-Principle I exists to eliminate, and it burns prompt tokens against Groq's
-8k TPM ceiling. Options, with the trade-off stated honestly:
-
-| Option | Gains | Costs |
+| Produced by Phase C | Where | Phase D consumes it as |
 |---|---|---|
-| **Code-driven first search** (recommended) — our node calls `search_listings` with `session["interview"]` values, model only narrates + drives relaxation | Principle I true by construction on the headline path; one fewer LLM round trip; smallest prompt | First hop is less "agentic", which rubs against hard requirement #1's framing |
-| **Model-driven search** — inject interview slots into the turn as a delimited context block | Model stays in the driving seat throughout | Grounding depends on the model copying numbers correctly; more tokens |
+| Verbatim listing records from the tool artifact | `SessionState.candidate_listings` (`list[dict]`, rank order) | the **catalogue surface**'s only data source |
+| `RankedRecommendation(listing_id, rank, fit_score, reasoning)` | `SessionState.recommendations` | card ordering + the explanation text |
+| Human-readable research trace | `ResearchOutcome.steps`, sent as `{"type":"progress"}` | the **reasoning-steps surface** |
 
-Two more T025-owned gaps found in the same audit:
-- **Nothing transitions RESEARCHING → RESULTS_READY**, and nothing writes
-  `SessionState.candidate_listings` / `.recommendations` — both fields are
-  defined and entirely unused. `save_interview_slots` is the only phase
-  mutation anywhere in the codebase. Principle II says this must be
-  code-enforced, not a model decision.
-- **The auto-kickoff breaks the WS send shape.** `chat_ws` picks one agent
-  from the pre-turn phase, runs one `ainvoke`, sends one chat + one a2ui
-  message. Research-in-the-same-turn needs two invocations and several
-  sends per inbound message. Restructure the send path in Phase C —
-  T026's reasoning-steps surface must stream from inside that loop, so
-  deferring it means writing this code twice.
+Key modules: `agent/research.py` (code-driven search + AS2 relaxation
+ladder), `agent/ranking.py` (deterministic scoring), `agent/mcp_client.py`
+(fail-soft discovery), `api/main.py::_run_research_turn` (the multi-send
+turn). `SessionState.record_research()` is the code-enforced
+RESEARCHING → RESULTS_READY transition.
+
+### Immediate next task: T026 + T022
+
+**T026 — two new A2UI surfaces in `agent/render_a2ui.py`.**
+Copy the pattern already proven by `build_interview_surface_init/_update`:
+an `init` that sends `createSurface` + the component tree, and an `update`
+that sends only `updateDataModel`. **A2UI v0.9**, `CATALOG_ID` unchanged.
+
+- **Reasoning-steps surface** — a `List`/`Column` of `Text`, fed from
+  `ResearchOutcome.steps`. This **replaces** the `{"type":"progress"}`
+  placeholder in `api/main.py`; hard requirement #5 and FR-005 say these
+  must be A2UI, so the placeholder is not shippable. The multi-send path is
+  already restructured, so this is a substitution, not a rewrite.
+- **Catalogue surface** — `Column` of `Card` → `Text`/`Image`/`Button`, fed
+  **only** from `candidate_listings` + `recommendations`. Never from the
+  model's prose, and never from `description`.
+- Only the 18 components in §8.19 exist. Check the list before designing.
+- Reuse `_display()` for enum/float formatting (§8.23) — the same
+  `TransactionType.BUY` and `30000.0` traps apply to listing fields.
+
+**T022 — the snapshot test that makes Principle I real.**
+Assert the A2UI catalogue's values are **exactly equal** to the source
+record's (Principle I / SC-002), and that `<untrusted_listing_data>` appears
+in **no** rendered string.
+
+⚠️ **Assert the test is non-vacuous.** Phase C's first grounding check
+searched for `$17,391` while `gpt-oss-120b` writes `$17 391` with a thin
+space: it matched nothing and reported PASS having examined zero values. A
+snapshot test that silently compares an empty set is worse than no test,
+because it reads as proof. Count what you compared and assert the count.
+
+### Then
+
 
 ### Then
 
@@ -771,19 +721,36 @@ For a new session, read in this order:
    Constitution Check table (**both** correction blocks)
 6. **`README.md`** — run instructions
 
-Then, before writing M3 Phase D code:
+Then, before writing M3 Phase D code — **the four that matter most are
+7, 8, 9 and 10**, because Phase D's whole job is rendering what they produce:
 
-7. `mcp-services/marketplace/store.py` — the query logic and the untrusted-data wrapper
-8. `mcp-services/marketplace/server.py` — the MCP tool contract Phase C consumes
-8a. `agent-backend/agent/research.py` + `agent/ranking.py` — **Phase C's output is Phase D's input**: `SessionState.candidate_listings` (verbatim tool records) and `.recommendations` are exactly what T026 must render and T022 must snapshot against
-9. `mcp-services/tests/test_marketplace_server.py` — the exact `structured_content` shape
-10. `agent-backend/agent/state.py` — `TOOLS_BY_PHASE` gate + entity shapes
-11. `agent-backend/agent/graph.py` — `PhaseAgentRegistry`/`TOOL_REGISTRY`; **T024/T025 change this**
-12. `agent-backend/api/main.py` — async lifespan + the WebSocket contract
-13. `agent-backend/agent/llm.py` — provider selection + per-provider token caps
-14. `agent-backend/agent/render_a2ui.py` — the surface pattern Phase D copies
-15. `agent-backend/agent/prompts.py` — `UNTRUSTED_DATA_RULE`
-16. `agent-backend/tests/test_phase_gate.py` — how the gate is proven; M3 must keep it passing
+7. `agent-backend/agent/state.py` — `SessionState.candidate_listings` /
+   `.recommendations` (**Phase D's data source**), `TOOLS_BY_PHASE` gate,
+   `record_research()`
+8. `agent-backend/agent/render_a2ui.py` — the surface pattern T026 copies,
+   and `_display()`'s enum/float traps
+9. `agent-backend/agent/research.py` — `ResearchOutcome.steps` (the
+   reasoning-steps source), the AS2 relaxation ladder, why the first search
+   is code-driven
+10. `agent-backend/agent/ranking.py` — how `fit_score` and `reasoning` are
+    derived; T022 snapshots against exactly these values
+11. `agent-backend/api/main.py` — async lifespan, the WebSocket contract,
+    `_run_research_turn` (**where the `{"type":"progress"}` placeholder T026
+    replaces is sent**)
+12. `agent-backend/tests/test_ranking.py` + `tests/test_research.py` — the
+    deterministic contract Phase D must not break
+13. `mcp-services/marketplace/store.py` — the query logic and
+    `wrap_untrusted()` (why `description` must never be rendered)
+14. `mcp-services/tests/test_marketplace_server.py` — the exact
+    `structured_content` shape
+15. `agent-backend/agent/graph.py` — `resolve_registry()` / `PhaseAgentRegistry`
+16. `agent-backend/tests/test_phase_gate.py` + `tests/test_mcp_wiring.py` —
+    how the gate is proven; M3 must keep both passing
+17. `agent-backend/agent/prompts.py` — `UNTRUSTED_DATA_RULE`
+18. `agent-backend/agent/llm.py` — provider selection + per-provider token caps
+19. `frontend/src/App.tsx` — renders every surface in `surfacesMap`
+    automatically (§8.22), so Phase D's surfaces appear without frontend work;
+    Phase E is layout + selection
 
 **Suggested opening prompt for the new chat** — copy this verbatim:
 
@@ -793,19 +760,43 @@ Then, before writing M3 Phase D code:
 > This is the Amulate Summer Hackathon 2026 "AI Car Matchmaker" project.
 > M0–M2.5 are complete. **M3 (User Story 2) is in progress**: Phase A (async
 > agent path), Phase B (T020/T023, marketplace MCP server) and Phase C
-> (T024/T025, MCP wiring + code-driven search + deterministic ranking) are
-> done, tested and pushed to `main`. **Continue from M3 Phase D (T026 +
-> T022)**, described in HANDOFF §10.
+> (T024/T025, MCP wiring + code-driven first search + deterministic ranking)
+> are done, tested, verified live and pushed to `main` (`82d4b6b`).
+> **Continue from M3 Phase D (T026 + T022)** — A2UI reasoning-steps and
+> catalogue surfaces — described in HANDOFF §10.
 >
 > Do **not** write code immediately. First confirm you have full context and
 > tell me anything in the docs that looks wrong, stale, or self-contradictory —
 > four separate audits have now found docs asserting behaviour the code did
-> not have (HANDOFF §3), so treat the docs as claims to verify.
+> not have (HANDOFF §3), so treat the docs as claims to verify. Note the
+> fourth audit found the *inverse* too: docs still describing limitations the
+> code had outgrown. Check both directions.
 >
 > Notes:
-> - The `langchain-mcp-adapters` API is already verified — HANDOFF §8.1–8.7.
->   Don't re-research it, but do sanity-check it still holds.
+> - Phase D renders what Phase C persists. `SessionState.candidate_listings`
+>   holds **verbatim tool records** and `.recommendations` holds the
+>   deterministic ranking — those two are the catalogue's only legitimate
+>   data source (Principle I). `ResearchOutcome.steps` feeds the
+>   reasoning-steps surface.
+> - `api/main.py` currently sends `{"type":"progress"}` as a **placeholder**.
+>   Requirement #5 says reasoning steps must be A2UI, so T026 replaces it.
+>   The multi-send path is already restructured — substitution, not rewrite.
+> - **Never render a listing's `description`** — it carries the
+>   `<untrusted_listing_data>` delimiters and is attacker-controlled text.
+> - **T022 must assert its own non-vacuity.** Phase C's first grounding check
+>   passed having examined zero values, because `gpt-oss-120b` writes
+>   "$17 391" with a thin space and the regex expected "$17,391". A snapshot
+>   test that silently compares nothing reads as proof. Count and assert.
+> - A2UI is **v0.9**, and only the 18 components in HANDOFF §8.19 exist.
+> - The `langchain-mcp-adapters` API is verified — HANDOFF §8.1–8.7. Don't
+>   re-research it, but do sanity-check it still holds.
 > - Outbound POSTs to LLM providers fail inside the default tool sandbox;
 >   live-LLM commands need `dangerouslyDisableSandbox: true`.
 > - Dev LLM is Groq (~1000 req/day), so live tests are affordable. It throttles
 >   on tokens/minute — a 20–70s "hang" is backoff, not a dead call.
+>
+> Two open decisions of mine that are recorded but unresolved — raise them,
+> don't decide them: (1) the demo's headline path still opens on a constraint
+> relaxation because no budget SUV is available before the target date
+> (tasks.md T021); (2) `select_listing` is a phase-gate entry with no
+> implementation, and **M4a depends on it** (tasks.md T028b).

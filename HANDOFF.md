@@ -111,12 +111,11 @@ M6   ⬜ Hardening, E2E tests, README finalization, deck, demo video
 | `agent-backend` | **163** | 9 | 19 modules, see §7 |
 
 - **193 pass with no external setup** (39 + 154)
-- **All 202 pass** with a live LLM key and Phoenix running. ⚠️ Verified in
-  pieces, not in one sweep: Groq's 200k tokens/day ran out mid-run (§5).
-  Every live test has passed against real Groq, but the final full green
-  sweep on the final code is still owed. A quota 429 now **skips** rather
-  than failing (§8.32), so a re-run when the window resets reads honestly
-  either way.
+- **All 202 pass** with a live LLM key *and* Phoenix running — measured
+  2026-08-08 in one sweep on a fresh key: `agent-backend` **163 passed, 0
+  skipped**, `mcp-services` 39. The whole live suite (9 gated tests, ~20
+  model turns) cost **19 requests**. A quota 429 now **skips** rather than
+  failing (§8.32), so a constrained re-run still reads honestly.
 - Exactly **9** gated tests, up from 3: the six new Phase F live tests join
   `test_interview_agent`, `test_chat_endpoint` (need `LLM_API_KEY`) and
   `test_otel_setup` (needs Phoenix). Do **not** count them by grepping
@@ -422,6 +421,14 @@ a scan that only covered two of those leaked a key into a transcript once.
   (§8.12). Budget accordingly: one full Phase F live run is 6 turns ≈ 9% of
   the day, and a demo rehearsal plus the T046 eval set will not both fit.
   **Plan the demo-day budget before demo day.**
+  ⚠️ **The TPD is invisible until you hit it.** `x-ratelimit-*` response
+  headers report requests/day and tokens/**minute** but **not** tokens/day,
+  so a healthy-looking header set tells you nothing about the limit that
+  actually stops you. That is why three milestones of docs quoted the
+  request count. To read the real state you must either track spend
+  yourself or read the 429 body, which does name it
+  (`Limit 200000, Used ...`). Checking `x-ratelimit-remaining-requests`
+  before a demo is **not** a sufficient pre-flight.
 - **Verified end-to-end at M3 start** through the real agent path
   (`build_interview_agent` → `save_interview_state`): 2-turn tool-using
   conversation survives, overwrite-not-append semantics correct. This is the
@@ -458,8 +465,12 @@ a scan that only covered two of those leaked a key into a transcript once.
 - **OpenRouter is exhausted** (free tier, ~$0 left). **NVIDIA NIM did not
   work here** (non-streaming `/chat/completions` returned nothing in 120s).
 
-🔴 **All three API keys (Gemini, Groq, NVIDIA NIM) have been pasted into chat
+🔴 **Four API keys (Gemini, two Groq, NVIDIA NIM) have been pasted into chat
 transcripts and should be rotated after the demo.** None was ever committed.
+The second Groq key was supplied mid-session on 2026-08-08 to finish Phase
+F's live sweep after the first key's daily tokens ran out; it lives only in
+the gitignored, `chmod 600` `agent-backend/.env`. It is on a **different
+organization** from the first — which is why it had a fresh 200k budget.
 
 ---
 
@@ -880,7 +891,9 @@ Before writing any of it, three things from this milestone will save a cycle:
 
 - **T029 has never run against Gemini**, which is the demo provider. An
   injection result is only evidence for the model it ran on. One rehearsal
-  run before the demo — ~4 turns, well inside Gemini's ~20/day.
+  run before the demo — ~4 turns, well inside Gemini's ~20/day. This is now
+  the *only* outstanding M3 verification: the full live sweep on Groq is
+  done and green (§2).
 - **T027** (listing-detail MCP App) stays deferred past M4a/M4b: it is the
   explicitly *additive secondary* surface while M4 is a hard requirement.
 
@@ -972,8 +985,10 @@ see §5. Consequences for M4a onward:
   avoid regenerating the dataset in the same pass as the catalogue.
   Re-measured 2026-08-08 across target dates: SUV/≤$25k/buy matches **1**
   by 2026-09-30, **1** by 2026-10-31, **4** by 2026-12-31.
-- 🔴 **Rotate all three API keys** (Gemini, Groq, NVIDIA NIM) after the demo —
-  all have been pasted into chat transcripts. None was ever committed.
+- 🔴 **Rotate all four API keys** (Gemini, **two** Groq, NVIDIA NIM) after the
+  demo — all have been pasted into chat transcripts. None was ever committed.
+  The second Groq key was added 2026-08-08 during Phase F; it is the one
+  currently in `agent-backend/.env`.
 
 ---
 

@@ -842,6 +842,12 @@ running the new tests:
   `tests/test_live_prose_helpers.py` (20 tests) against real captured
   output.
 
+**Verified**: the full live suite passed in one sweep on 2026-08-08 —
+`agent-backend` 163 passed / 0 skipped with a live key and Phoenix running,
+`mcp-services` 39. Total cost 19 Groq requests. The only M3 verification
+still outstanding is T029 against Gemini (the demo provider), since an
+injection result is only evidence for the model it ran on.
+
 ---
 
 ## Phase 5: User Story 3 - In-Chat Booking Form via MCP App (P2) — M4a

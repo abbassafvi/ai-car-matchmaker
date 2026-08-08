@@ -26,7 +26,8 @@ form, mock checkout) are the remaining M4 work.
 
 **202 automated tests**, of which **193 run with no external setup at all**
 (39 `mcp-services` + 154 `agent-backend`); the remaining 9 need a live LLM key
-and/or a running Phoenix and auto-skip without them. Plus live end-to-end
+and/or a running Phoenix and auto-skip without them. All 202 have been run
+green together against a live model and a running Phoenix. Plus live end-to-end
 verification against a real Docker Compose build. See
 [`specs/001-ai-car-matchmaker/`](specs/001-ai-car-matchmaker/) for the full
 spec-driven-development trail:

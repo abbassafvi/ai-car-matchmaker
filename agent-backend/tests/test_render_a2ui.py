@@ -19,7 +19,7 @@ KNOWN_MESSAGE_TYPES = {
     "deleteSurface", "actionResponse", "callFunction",
 }
 # Components used here, all defined in the basic catalog.
-KNOWN_COMPONENTS = {"Column", "Card", "Row", "CheckBox", "Text"}
+KNOWN_COMPONENTS = {"Column", "List", "Card", "Row", "CheckBox", "Text"}
 
 
 def _assert_valid_envelope(msg: dict):

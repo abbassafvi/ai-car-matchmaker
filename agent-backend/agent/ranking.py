@@ -63,9 +63,17 @@ def _normalise(values: list[float], *, higher_is_better: bool) -> list[float]:
     ]
 
 
-def _money(amount: float) -> str:
-    """Whole dollars with thousands separators; no invented cents."""
+def money(amount: float) -> str:
+    """Whole dollars with thousands separators; no invented cents.
+
+    Public because `render_a2ui` formats the same prices for the catalogue
+    surface. One formatter, so a card and the reasoning line printed beneath
+    it can never disagree about how the same number is written.
+    """
     return f"${amount:,.0f}"
+
+
+_money = money  # retained for readability inside this module
 
 
 def _reasoning(listing: dict[str, Any], interview: dict[str, Any]) -> str:

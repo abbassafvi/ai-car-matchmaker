@@ -30,11 +30,11 @@ and a *mocked* checkout **without leaving the chat**.
 
 | # | Requirement | Status |
 |---|---|---|
-| 1 | Multistep agent: interview → research → ranked+explained recommendations | 🟡 interview → auto-research → deterministic ranking + explanations all working end to end (verified live). Remaining: surfacing them via **A2UI** rather than chat prose = M3 Phase D |
+| 1 | Multistep agent: interview → research → ranked+explained recommendations | ✅ interview → auto-research → deterministic ranking + explanations, all surfaced via **A2UI** since Phase D (verified live end to end) |
 | 2 | Interview captures: use case, car type/category, budget, buy-vs-rent, target date | ✅ |
 | 3 | **Form-filling MUST be an MCP App** rendered inside the chat | ⬜ M4a |
 | 4 | **Mock payment/checkout MUST be an MCP App** rendered inside the chat | ⬜ M4b |
-| 5 | Car catalogue + live agent progress (interview state, search status, **reasoning steps**) MUST render via **A2UI** — explicitly *"not static HTML"* | 🟡 interview-progress surface live in A2UI. Reasoning steps are **generated** and streamed but currently ride a placeholder `{"type":"progress"}` message — converting them plus the catalogue to A2UI is M3 Phase D (T026). **This row is not satisfiable without Phase D.** |
+| 5 | Car catalogue + live agent progress (interview state, search status, **reasoning steps**) MUST render via **A2UI** — explicitly *"not static HTML"* | ✅ **satisfied in Phase D (T026)**. Three A2UI surfaces render live: `interview-progress`, `research-reasoning` (per-step trace with icons) and `catalogue` (ranked cards). The `{"type":"progress"}` placeholder is deleted. Verified in a real browser against the real stack |
 | 6 | No real payments, no BMW Group APIs — checkout fully mocked | ✅ by construction |
 | 7 | Mock marketplace: **≥100 listings, ≥10 categories, ≥10 brands per category** | ✅ 203 / 10 / 20 |
 | 8 | Maintain state across interview/research/recommendation (multistep memory) | ✅ checkpointer proven across restart + session isolation + live WS reconnect |
@@ -88,8 +88,9 @@ M3   🟡 IN PROGRESS — Research & Ranked Recommendations (User Story 2)
        ✅ Phase A  async agent path (blocking prerequisite, see §3)
        ✅ Phase B  T020 + T023 marketplace MCP server
        ✅ Phase C  T024 + T025 adapter wiring, ranking, research auto-kickoff
-       ⬜ Phase D  T026 + T022 A2UI catalogue + reasoning surfaces
-       ⬜ Phase E  T028 frontend rendering + listing selection
+       ✅ Phase D  T026 + T022 A2UI catalogue + reasoning surfaces, themed
+                   frontend, grounding snapshot test
+       ⬜ Phase E  T028 listing selection (`select_listing` + action wiring)
        ⬜ Phase F  T021 + T029 live behavioural tests
        ⬜ (T027 listing-detail MCP App — recommended deferred past M4)
 M4a  ⬜ Booking form MCP App (User Story 3)
@@ -99,15 +100,15 @@ M5   ⬜ Evals (observability itself is wired, M2.5/T051)
 M6   ⬜ Hardening, E2E tests, README finalization, deck, demo video
 ```
 
-**Test suite: 117 total** (measured 2026-08-08 after Phase C, not copied forward).
+**Test suite: 141 total** (measured 2026-08-08 after Phase D, not copied forward).
 
 | Suite | Tests | Gated | Files |
 |---|---|---|---|
 | `mcp-services` | **35** | 0 | `test_generate_listings` (8), `test_marketplace` (18), `test_marketplace_server` (9) |
-| `agent-backend` | **82** | 3 | 14 modules, see §7 |
+| `agent-backend` | **106** | 3 | 15 modules, see §7 |
 
-- **114 pass with no external setup** (35 + 79)
-- **All 117 pass** with a live LLM key *and* Phoenix running — verified 2026-08-08
+- **138 pass with no external setup** (35 + 103)
+- **All 141 pass** with a live LLM key *and* Phoenix running — verified 2026-08-08
 - Exactly **3** gated tests (`grep -rn skipif */tests/`): `test_interview_agent`
   and `test_chat_endpoint` (need `LLM_API_KEY`), `test_otel_setup` (needs Phoenix)
 
@@ -384,11 +385,11 @@ python mcp-services/data/generate_listings.py
 | `agent/ranking.py` | **T025**: deterministic `rank()` over tool-artifact records. Min-max normalised *within the slate*; `reasoning` is a template filled from record fields, never the `description` |
 | `agent/research.py` | **T025**: `run_research()` — code-driven first search from persisted interview state, AS2 relaxation ladder, `narration_brief()` for the model |
 | `agent/llm.py` | `build_model()` selects by `LLM_PROVIDER`. **`DEFAULT_MAX_TOKENS_BY_PROVIDER`** (google 4096 / openai_compatible 1024) + `LLM_MAX_TOKENS` override |
-| `agent/render_a2ui.py` | `build_interview_surface_init()`/`_update()`, `_display()`. **A2UI v0.9**. **Phase D adds catalogue + reasoning surfaces here** |
-| `api/main.py` | FastAPI. `GET /health`, `WS /ws/{session_id}`. **AsyncSqliteSaver lifespan, `agent.ainvoke`, `aget_state`**, `message_text()` |
+| `agent/render_a2ui.py` | **A2UI v0.9.** Three surfaces, each `_init()` (createSurface + tree + data) / `_update()` (data only): interview, **reasoning** and **catalogue** (T026). Plus `_display()` (enum/float traps), `ICON_PATHS`/`icon()` (inline SVG, §8.21d) and `STEP_KIND_ICONS`. Every surface's root component **must** have id `root` (§8.21c) |
+| `api/main.py` | FastAPI. `GET /health`, `WS /ws/{session_id}`. **AsyncSqliteSaver lifespan, `agent.ainvoke`, `aget_state`**, `message_text()`. **`_SurfaceStream`** owns per-connection init-vs-update for all three A2UI surfaces; a resumed session with `recommendations` gets its catalogue re-emitted on connect |
 | `observability/otel_setup.py` | `setup_observability()` → `phoenix.otel.register(..., protocol="grpc", auto_instrument=True)` |
 | `conftest.py` | Puts the service root on `sys.path` so the suite collects under a bare `pytest`, not only `python -m pytest`. Added by the Phase C audit — see §3 |
-| `tests/` | **14 modules, 82 tests** (+`test_ranking` 12, `test_research` 17, `test_mcp_wiring` 8)<br>previously **11 modules, 45 tests**: `test_state`(6), `test_tools`(5), `test_graph_persistence`(2), `test_render_a2ui`(8), `test_chat_endpoint`(3), `test_chat_endpoint_error_handling`(1), `test_interview_agent`(1), `test_otel_setup`(1), `test_phase_gate`(10), `test_observability_wiring`(2), `test_message_text`(6) |
+| `tests/` | **15 modules, 106 tests** (+`test_catalogue_grounding` 24 = T022)<br>previously **14 modules, 82 tests** (`test_ranking` 12, `test_research` 17, `test_mcp_wiring` 8)<br>and before that **11 modules, 45 tests**: `test_state`(6), `test_tools`(5), `test_graph_persistence`(2), `test_render_a2ui`(8), `test_chat_endpoint`(3), `test_chat_endpoint_error_handling`(1), `test_interview_agent`(1), `test_otel_setup`(1), `test_phase_gate`(10), `test_observability_wiring`(2), `test_message_text`(6) |
 
 ### mcp-services (Python) — **rewritten in M3 Phase B**
 | File | Purpose |
@@ -405,10 +406,15 @@ python mcp-services/data/generate_listings.py
 | `app_stub.py` | **DELETED** in Phase B |
 
 ### frontend (React + Vite + TypeScript)
-`src/App.tsx` (chat + A2UI surface), `src/main.tsx`, `index.html`,
+`src/App.tsx` (chat + A2UI surfaces), **`src/app.css`** (chat shell),
+**`src/a2ui-theme.css`** (the `--a2ui-*` theme + document baseline — see
+§8.21e/§8.21f before editing selectors), `src/main.tsx`, `index.html`,
 `package.json` (**`@a2ui/react` + `@a2ui/web_core` v0.10.2**, React 19,
 Vite 8), multi-stage `Dockerfile` (**`npm ci` with the lockfile** → nginx).
 `src/{chat,a2ui,mcp-app-host}/` exist but are **empty**.
+App.tsx renders **every** surface in `processor.model.surfacesMap`, so the
+backend can add surfaces without a frontend change (proven by Phase D: the
+two new surfaces appeared with no App.tsx change beyond styling).
 
 ---
 
@@ -498,10 +504,23 @@ Every one is verified, not assumed.
 18. **Use protocol v0.9, not v1.0.** `@a2ui/react` v0.10.2 exports only
     `.`, `./v0_8`, `./v0_9` — no v1_0. (`@a2ui/web_core` ships v1_0 *schemas*
     under `src/` but does not export them.) Re-verified at M3 start.
-19. **v0.9 basic catalog components** (all that Phase D may use): `Text`,
+19. **v0.9 basic catalog components** (the only 18 that exist): `Text`,
     `Image`, `Icon`, `Video`, `AudioPlayer`, `Row`, `Column`, `List`, `Card`,
     `Tabs`, `Modal`, `Divider`, `Button`, `TextField`, `CheckBox`,
-    `ChoicePicker`, `Slider`, `DateTimeInput`.
+    `ChoicePicker`, `Slider`, `DateTimeInput`. Re-verified in Phase D against
+    the installed schema; all are implemented in the React build.
+    Required props worth knowing before designing a tree: `Card` requires a
+    single `child` (wrap multiples in a Column), `List`/`Row`/`Column`
+    require `children`, `Text` requires `text`, and **`Button` requires both
+    `child` and `action`** — there is no decorative Button.
+
+19a. 🔴 **`Image` is unusable for the catalogue and three docs specified it
+    anyway.** v0.9's `Image` requires a `url`, and **no listing record has
+    one** — the dataset's 15 fields contain no image/photo/url. Binding a
+    stock or generated URL would put a value on screen traceable to no
+    tool-call result: a Principle I breach in the exact surface T022 exists
+    to guard. Phase D dropped it and uses `Icon` for visual structure. Do not
+    reintroduce it without adding a real, grounded image field.
 20. **Listing selection (Phase E)**: `new MessageProcessor(catalogs,
     actionHandler, options)` — the **2nd constructor arg is a global
     `ActionListener`** `(action: A2uiClientAction) => void`. That is how a
@@ -510,11 +529,49 @@ Every one is verified, not assumed.
 21. **`@a2ui/react@0.10.2`'s `"./styles/structural.css"` export is broken** —
     points at a file not in the published package. Import dropped; components
     render unstyled but functional. Styling is an open item (§11).
-21a. **Phase C's reasoning steps ride a placeholder, not A2UI.**
-    `api/main.py` sends `{"type": "progress", "steps": [...]}`. Hard
-    requirement #5 and FR-005 both say reasoning steps must be A2UI, so this
-    is **not shippable as-is** — T026 replaces it. The multi-send path is
-    already restructured, so it is a substitution, not a rewrite.
+21a. ✅ *(resolved in Phase D)* Phase C's `{"type":"progress"}` placeholder
+    is **deleted**; reasoning steps are the `research-reasoning` A2UI
+    surface. Worth recording why removal was free: **nothing ever consumed
+    it.** `App.tsx` handled `chat`/`a2ui`/`error` only, so Phase C's steps
+    were generated, streamed and dropped. "Verified live" in Phase C meant
+    verified at the socket, not on a screen.
+
+21c. 🔴 **A surface's root component MUST have id `root`.** The renderer
+    resolves a surface's entry point by that well-known id, not by
+    declaration order or by being first in the list. A tree whose top
+    component is called anything else is schema-valid, passes every unit
+    test, and renders `[Loading root...]` forever — created, populated and
+    permanently invisible. Cost a live debugging cycle; now regression-tested
+    in `test_catalogue_grounding.py`. Component ids are scoped per surface,
+    so every surface has its own `root`.
+
+21d. 🔴 **Catalog icon *names* are Material Symbols font ligatures.**
+    `Icon.name` accepts an enum name, an `{"svgPath": ...}` object, or a
+    DataBinding. The enum path renders `<span class="material-symbols-outlined">payment</span>`
+    — so without that font loaded, every icon renders as its own literal
+    name. The first catalogue read "payment", "location_on",
+    "calendar_today" down the page. **Use `{"svgPath": ...}`**: it renders an
+    inline `<svg viewBox="0 0 24 24">`, needs no font, no CDN and no
+    committed binary, and works offline. `Icon.name` accepting a DataBinding
+    is what lets the reasoning surface give each step its own icon without
+    string-sniffing the step text.
+
+21e. 🔴 **A2UI output is themed ONLY through `--a2ui-*` CSS custom
+    properties.** The renderer writes structure as inline styles whose every
+    value is `var(--a2ui-something, fallback)`, so there is no class-based
+    override API — and inline styles beat your stylesheet anyway. This, not
+    the broken `structural.css` export (finding 21), is why surfaces looked
+    unstyled since M2. **`--a2ui-border` has no built-in fallback**, so
+    leaving it undefined renders every card borderless. See
+    `frontend/src/a2ui-theme.css`.
+
+21f. **The rendered DOM is not what you would guess** — read it off the page
+    before writing selectors (this took two attempts). `Text` with
+    `variant: "h3"` renders `<div class="h3"><h3>…</h3></div>` — a wrapper
+    div carrying the class *plus* a real heading element inside. But
+    `variant: "caption"` renders `<span><em>…</em></span>` — italic, and
+    with **no `caption` class at all**. Text is also markdown-rendered, which
+    is a further reason never to bind untrusted listing prose to a `Text`.
 21b. **Never render a listing's `description`.** The MCP server wraps it in
     `<untrusted_listing_data>` for *every* consumer, including the artifact
     the ranker reads, so binding it to a `Text` component would put the
@@ -589,19 +646,59 @@ Full text in `.specify/memory/constitution.md`.
 
 ---
 
-## 10. NEXT UP: M3 Phase D — start here
+## 10. NEXT UP: M3 Phase E — start here
 
-### What Phase C left you (read this before touching Phase D)
+### What Phase D left you
+
+Phase D (T026 + T022) is **done, verified live in a browser, and pushed**.
+Three A2UI surfaces now render — `interview-progress`, `research-reasoning`
+and `catalogue` — and hard requirement #5 is satisfied. What Phase E
+inherits:
+
+| Produced by Phase D | Where | Phase E uses it for |
+|---|---|---|
+| `catalogue` surface, `List` of `Card` per listing | `agent/render_a2ui.py::_catalogue_components` | adding a per-card `Button` |
+| `id` already carried on every catalogue row (unrendered) | `_catalogue_rows` | the `Button`'s `action.context` — the selected listing id |
+| `_SurfaceStream` (per-connection init-vs-update) | `api/main.py` | re-emitting the tree once a Button is added |
+| Themed, non-broken frontend | `frontend/src/{app,a2ui-theme}.css` | styling the button |
+
+**The one thing Phase D deliberately did not do**: the catalogue has no
+`Button` yet. A2UI's `Button` requires an `action`, and the whole action
+path — `MessageProcessor`'s `ActionListener` (§8.20), an inbound
+`{"type":"action"}` WS message, and `select_listing` itself — is Phase E.
+Shipping a button that did nothing in front of a judge was the worse option.
+So Phase E is one coherent slice, not two halves:
+
+1. **`select_listing`** (`agent/tools.py`): writes
+   `SessionState.selected_listing_id`, transitions RESULTS_READY →
+   FORM_FILLING. **It has never existed** — `TOOLS_BY_PHASE` has named it
+   since M2.5 and `RESULTS_SYSTEM_PROMPT` already tells the model to "record
+   the selection with the appropriate tool", so the model is currently
+   instructed to call a tool that isn't bound. **M4a depends on this**:
+   Principle II's own worked example is `open_booking_form` gated on a
+   listing being selected.
+2. **The `Button`** in `_catalogue_components`, with
+   `action: {event: {name: "select_listing", context: {listing_id: {path: "id"}}}}`.
+   ⚠️ Unverified: whether a *bound* (`{"path": ...}`) action context resolves
+   per-row inside a template. Check it early — if it doesn't, the fallback is
+   a per-row literal, which means one component per card rather than a
+   template.
+3. **Frontend**: pass an `ActionListener` as `MessageProcessor`'s 2nd
+   constructor arg (`App.tsx` currently passes only `[basicCatalog]`) and
+   send `{"type":"action"}`; `chat_ws` currently `continue`s on anything
+   that is not `{"type":"chat"}`.
+
+### What Phase C left (still true, still the data contract)
 
 Phase C (T024 + T025) is **done, verified live, and pushed** (`dd7ab4a`).
 The full record with rationale is in tasks.md under T024/T025; what matters
 for Phase D is the shape of what it produces:
 
-| Produced by Phase C | Where | Phase D consumes it as |
+| Produced by Phase C | Where | Phase D renders it as |
 |---|---|---|
 | Verbatim listing records from the tool artifact | `SessionState.candidate_listings` (`list[dict]`, rank order) | the **catalogue surface**'s only data source |
 | `RankedRecommendation(listing_id, rank, fit_score, reasoning)` | `SessionState.recommendations` | card ordering + the explanation text |
-| Human-readable research trace | `ResearchOutcome.steps`, sent as `{"type":"progress"}` | the **reasoning-steps surface** |
+| Human-readable research trace | `ResearchOutcome.steps` (+ `.step_kinds`, added in Phase D so the UI picks an icon per step without parsing its prose) | the **reasoning-steps surface** |
 
 Key modules: `agent/research.py` (code-driven search + AS2 relaxation
 ladder), `agent/ranking.py` (deterministic scoring), `agent/mcp_client.py`
@@ -609,46 +706,11 @@ ladder), `agent/ranking.py` (deterministic scoring), `agent/mcp_client.py`
 turn). `SessionState.record_research()` is the code-enforced
 RESEARCHING → RESULTS_READY transition.
 
-### Immediate next task: T026 + T022
-
-**T026 — two new A2UI surfaces in `agent/render_a2ui.py`.**
-Copy the pattern already proven by `build_interview_surface_init/_update`:
-an `init` that sends `createSurface` + the component tree, and an `update`
-that sends only `updateDataModel`. **A2UI v0.9**, `CATALOG_ID` unchanged.
-
-- **Reasoning-steps surface** — a `List`/`Column` of `Text`, fed from
-  `ResearchOutcome.steps`. This **replaces** the `{"type":"progress"}`
-  placeholder in `api/main.py`; hard requirement #5 and FR-005 say these
-  must be A2UI, so the placeholder is not shippable. The multi-send path is
-  already restructured, so this is a substitution, not a rewrite.
-- **Catalogue surface** — `Column` of `Card` → `Text`/`Image`/`Button`, fed
-  **only** from `candidate_listings` + `recommendations`. Never from the
-  model's prose, and never from `description`.
-- Only the 18 components in §8.19 exist. Check the list before designing.
-- Reuse `_display()` for enum/float formatting (§8.23) — the same
-  `TransactionType.BUY` and `30000.0` traps apply to listing fields.
-
-**T022 — the snapshot test that makes Principle I real.**
-Assert the A2UI catalogue's values are **exactly equal** to the source
-record's (Principle I / SC-002), and that `<untrusted_listing_data>` appears
-in **no** rendered string.
-
-⚠️ **Assert the test is non-vacuous.** Phase C's first grounding check
-searched for `$17,391` while `gpt-oss-120b` writes `$17 391` with a thin
-space: it matched nothing and reported PASS having examined zero values. A
-snapshot test that silently compares an empty set is worse than no test,
-because it reads as proof. Count what you compared and assert the count.
-
-### Then
-
-
 ### Then
 
 | Phase | Task | Work |
 |---|---|---|
-| D | T026 | `render_a2ui.py`: reasoning-steps surface (`List` of steps, emitted during search) + catalogue surface (`Column` of `Card` → `Text`/`Image`/`Button`). Fed from the artifact only |
-| D | T022 | Snapshot test: A2UI catalogue values **exactly equal** artifact values (Principle I / SC-002). **Also assert `<untrusted_listing_data>` appears in no rendered string** — `wrap_untrusted` rewrites `description` for every consumer including the ranker's artifact, and store.py's "the delimiters never reach a screen" is currently enforced by a code comment only |
-| E | T028 | Frontend: layout the two new surfaces; `MessageProcessor` action handler + new `{"type":"action"}` WS message (finding 20). **Plus a backend half nobody had assigned: `select_listing` does not exist.** The gate has named it since M2.5, no module implements it, no task created it — and Principle II's own example is `open_booking_form` gated on a selection, so **M4a cannot gate on something nothing can record** |
+| E | T028 | Listing selection, as one coherent slice — see the three numbered steps above. `select_listing` is the piece nothing has ever implemented, and **M4a depends on it** |
 | F | T029 | **Security test**: the 3 `ADV-*` listings cause **zero** behavioural deviation (Principle IV) |
 | F | T021 | Integration test: zero-match → agent **relaxes a constraint and says so** |
 | — | T027 | `mcp-apps-ui/listing-detail/` — **recommended deferred past M4a/M4b**, it is the explicitly *additive secondary* surface while M4 is a hard requirement |
@@ -669,7 +731,16 @@ since an injection result is only evidence for the model it ran on.
 - **Evals (bonus #15) still owed** — T046.
 - **Slide deck template** — organizers haven't provided it. T049 blocked.
 - **Demo video** — T050. Recording is the user's to do.
-- **A2UI styling** — components render unstyled (§8.21). Needs polish.
+- ✅ *(resolved in Phase D)* **A2UI styling** — the surfaces are themed via
+  `frontend/src/a2ui-theme.css` (`--a2ui-*` custom properties, §8.21e) and
+  the chat shell via `app.css`. The page also now pins `color-scheme: light`,
+  because with no global CSS the browser's dark-mode UA defaults produced a
+  black chat panel beside white A2UI cards for any viewer in dark mode.
+- **Chat history is not replayed on reconnect.** A resumed session restores
+  the A2UI surfaces (interview + catalogue) but the chat log starts empty —
+  the transcript lives in the checkpointer's message history and nothing
+  sends it. Cosmetic for the demo, but it makes a resumed session look
+  emptier than it is. Belongs with T043.
 - **Groq TPM ceiling** is the main demo risk (§5). Keep the model's candidate
   slate short; consider `llama-3.3-70b-versatile` (12k TPM) if throttling bites,
   accepting weaker prompt adherence.
@@ -684,10 +755,15 @@ since an injection result is only evidence for the model it ran on.
 - 🔴 **The demo's headline path still opens on a constraint relaxation.**
   §3b fixed the *price* floor so US2 AS1 matches 4 SUVs, but every real
   session also applies `target_date`, and **0** of those 4 are available
-  before 2026-09-01 (they land 09-18 → 12-19; only 47/203 listings are
-  available before September). Behaviour is correct and was verified live,
-  but a judge's first impression is an apology. Options in tasks.md T021 —
-  the cheapest is to demo with a later target date.
+  before 2026-09-01 (they land 09-18, 11-10, 11-28, 12-19; only **45**/203
+  listings are available before September — the "47" previously recorded
+  here and in tasks.md T021 was never measured). Behaviour is correct and
+  was verified live, but a judge's first impression is an apology.
+  **Decided in Phase D**: demo with a later target date (option (b)); the
+  availability skew (option (a)) stays on the table but was not taken, to
+  avoid regenerating the dataset in the same pass as the catalogue.
+  Re-measured 2026-08-08 across target dates: SUV/≤$25k/buy matches **1**
+  by 2026-09-30, **1** by 2026-10-31, **4** by 2026-12-31.
 - 🔴 **Rotate all three API keys** (Gemini, Groq, NVIDIA NIM) after the demo —
   all have been pasted into chat transcripts. None was ever committed.
 

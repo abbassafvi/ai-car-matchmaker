@@ -18,15 +18,20 @@ NotImplementedError. Verified empirically before making this change.
 Message envelope (both directions):
   {"type": "chat", "content": "..."}                 -- chat text
   {"type": "a2ui", "messages": [...]}                 -- A2UI protocol messages (agent -> client only)
-  {"type": "progress", "steps": [...]}                -- research reasoning steps (agent -> client only)
   {"type": "error", "message": "..."}                 -- graceful failure (agent -> client only)
 
-`progress` is a Phase C placeholder with a deliberate shelf life: hackathon
-requirement #5 and FR-005 say reasoning steps must render via A2UI, so T026
-(Phase D) replaces it with real A2UI surface messages. It exists now because
-the send path had to be restructured for multi-send turns anyway (one
-inbound message can now produce an interview update, a research trace and a
-narration), and doing that once is cheaper than doing it twice.
+Phase C's `{"type": "progress", "steps": [...]}` placeholder is **gone** as
+of T026: hackathon requirement #5 and FR-005 both say reasoning steps must
+render via A2UI, and they now do, as the `research-reasoning` surface.
+Removing it cost no frontend change, because nothing ever consumed it --
+App.tsx handled chat/a2ui/error only, so Phase C's steps were generated,
+streamed and dropped on the floor.
+
+Three A2UI surfaces are emitted, all through the one `a2ui` envelope:
+`interview-progress` (M2), `research-reasoning` and `catalogue` (T026).
+Each is created once per connection and updated incrementally thereafter --
+`_SurfaceStream` below owns that bookkeeping, because a second
+`createSurface` for a live surface is not an update, it is a reset.
 """
 from __future__ import annotations
 
@@ -48,9 +53,19 @@ load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 from agent.graph import PhaseAgentRegistry  # noqa: E402
 from agent.llm import is_configured  # noqa: E402
 from agent.mcp_client import discover_marketplace_tools  # noqa: E402
-from agent.render_a2ui import build_interview_surface_init, build_interview_surface_update  # noqa: E402
+from agent.render_a2ui import (  # noqa: E402
+    CATALOGUE_SURFACE_ID,
+    INTERVIEW_SURFACE_ID,
+    REASONING_SURFACE_ID,
+    build_catalogue_surface_init,
+    build_catalogue_surface_update,
+    build_interview_surface_init,
+    build_interview_surface_update,
+    build_reasoning_surface_init,
+    build_reasoning_surface_update,
+)
 from agent.research import SEARCH_TOOL, narration_brief, run_research  # noqa: E402
-from agent.state import InterviewState, Phase, SessionState  # noqa: E402
+from agent.state import InterviewState, Phase, RankedRecommendation, SessionState  # noqa: E402
 from observability.otel_setup import setup_observability  # noqa: E402
 
 log = logging.getLogger(__name__)
@@ -157,7 +172,65 @@ def message_text(message) -> str:
     return str(content)
 
 
-async def _run_research_turn(websocket: WebSocket, agents, session: dict, config) -> dict:
+class _SurfaceStream:
+    """Per-connection A2UI surface bookkeeping.
+
+    A2UI's incremental model splits every surface into a one-time
+    `createSurface` + component tree and cheap `updateDataModel` messages
+    thereafter. Which of the two to send depends on whether *this* client
+    has seen the tree yet, so the state belongs to the connection, not to
+    the session: a reconnecting browser has no prior tree to patch, even
+    when the session it is resuming is old (US5).
+
+    Re-sending `createSurface` for a live surface would be a reset, not an
+    update, so the decision is made here once rather than at each call site.
+    """
+
+    def __init__(self, websocket: WebSocket):
+        self._websocket = websocket
+        self._live: set[str] = set()
+
+    async def send(self, surface_id: str, build_init, build_update) -> None:
+        """Emit `surface_id`, initialising it on first use.
+
+        Both arguments are callables so only the branch actually taken is
+        built -- the init path serialises a full component tree.
+        """
+        if surface_id in self._live:
+            messages = [build_update()]
+        else:
+            messages = build_init()
+            self._live.add(surface_id)
+        await self._websocket.send_json({"type": "a2ui", "messages": messages})
+
+
+def _catalogue_inputs(session: dict) -> tuple[list[dict], list[RankedRecommendation], dict]:
+    """The catalogue's three inputs, read from persisted session state.
+
+    Principle I's grounding channel in its persisted form: the listings are
+    the verbatim tool records `record_research` stored, and the
+    recommendations are the deterministic ranker's own output. Neither is
+    re-derived here and neither comes from the model.
+    """
+    return (
+        session.get("candidate_listings") or [],
+        [RankedRecommendation.model_validate(rec) for rec in session.get("recommendations") or []],
+        session.get("interview") or {},
+    )
+
+
+async def _send_catalogue(surfaces: _SurfaceStream, session: dict) -> None:
+    listings, recommendations, interview = _catalogue_inputs(session)
+    await surfaces.send(
+        CATALOGUE_SURFACE_ID,
+        lambda: build_catalogue_surface_init(listings, recommendations, interview),
+        lambda: build_catalogue_surface_update(listings, recommendations, interview),
+    )
+
+
+async def _run_research_turn(
+    websocket: WebSocket, agents, session: dict, config, surfaces: _SurfaceStream
+) -> dict:
     """T025: research runs in the same turn the interview completes.
 
     spec.md US1 AS3 requires the INTERVIEWING -> RESEARCHING transition to
@@ -172,8 +245,14 @@ async def _run_research_turn(websocket: WebSocket, agents, session: dict, config
     """
     outcome = await run_research(session["interview"], agents.extra_tools)
 
-    # Phase D (T026) replaces this with an A2UI reasoning-steps surface.
-    await websocket.send_json({"type": "progress", "steps": outcome.steps})
+    # T026: the reasoning trace goes out first and on its own, before the
+    # slower narration round trip, so the user watches the search reason
+    # rather than waiting at a blank panel (requirement #5 / FR-005).
+    await surfaces.send(
+        REASONING_SURFACE_ID,
+        lambda: build_reasoning_surface_init(outcome.steps, outcome.step_kinds),
+        lambda: build_reasoning_surface_update(outcome.steps, outcome.step_kinds),
+    )
 
     if outcome.error:
         # A failed pass leaves the phase at RESEARCHING deliberately, so the
@@ -191,6 +270,11 @@ async def _run_research_turn(websocket: WebSocket, agents, session: dict, config
         state = SessionState.model_validate(session)
         state.record_research(outcome.listings, outcome.recommendations)
         session = state.model_dump(mode="json")
+
+        # Render from what was just persisted, not from `outcome`, so the
+        # catalogue on screen is provably the same slate a reconnect will
+        # rebuild from -- one code path, one source of truth.
+        await _send_catalogue(surfaces, session)
 
     narrator = agents.for_phase(Phase(session["phase"]))
     result = await narrator.ainvoke(
@@ -228,14 +312,27 @@ async def chat_ws(websocket: WebSocket, session_id: str):
     config = {"configurable": {"thread_id": session_id}}
 
     session = await _load_session(agents, config, session_id)
+    surfaces = _SurfaceStream(websocket)
 
     # Full component tree on every connect -- a freshly loaded frontend has
     # no prior tree to apply incremental updates to, whether this is a
     # brand-new session or a resumed one (US5).
-    await websocket.send_json({
-        "type": "a2ui",
-        "messages": build_interview_surface_init(InterviewState(**session["interview"])),
-    })
+    await surfaces.send(
+        INTERVIEW_SURFACE_ID,
+        lambda: build_interview_surface_init(InterviewState(**session["interview"])),
+        lambda: build_interview_surface_update(InterviewState(**session["interview"])),
+    )
+
+    # A resumed session that already has a ranked slate gets its catalogue
+    # back immediately, rebuilt from `SessionState.candidate_listings`.
+    # Without this, reconnecting to a RESULTS_READY session would show an
+    # empty panel despite the records being persisted -- which is the exact
+    # symptom tasks.md T025(iii) persisted them to prevent, and which no
+    # doc had assigned to a task. The reasoning trace is deliberately not
+    # replayed: steps describe one search as it happened and are not
+    # persisted, whereas the slate is durable state.
+    if session.get("recommendations"):
+        await _send_catalogue(surfaces, session)
 
     try:
         while True:
@@ -283,16 +380,20 @@ async def chat_ws(websocket: WebSocket, session_id: str):
                 "type": "chat", "role": "assistant",
                 "content": message_text(result["messages"][-1]),
             })
-            await websocket.send_json({
-                "type": "a2ui",
-                "messages": [build_interview_surface_update(InterviewState(**session["interview"]))],
-            })
+            await surfaces.send(
+                INTERVIEW_SURFACE_ID,
+                lambda: build_interview_surface_init(InterviewState(**session["interview"])),
+                lambda: build_interview_surface_update(InterviewState(**session["interview"])),
+            )
 
             # One inbound message can now produce several outbound ones: the
-            # interview reply above, then a research trace and a narration.
+            # interview reply above, then a reasoning trace, a catalogue and
+            # a narration.
             if Phase(session["phase"]) == Phase.RESEARCHING:
                 try:
-                    session = await _run_research_turn(websocket, agents, session, config)
+                    session = await _run_research_turn(
+                        websocket, agents, session, config, surfaces
+                    )
                 except Exception:
                     # Same contract as the interview turn: a failure explains
                     # itself and leaves the session usable. `session` keeps

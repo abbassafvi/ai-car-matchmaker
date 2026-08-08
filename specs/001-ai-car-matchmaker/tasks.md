@@ -395,8 +395,10 @@ decision for the user** and should be settled before Phase C starts.
       | …**and** available by 2026-09-01 | **0** |
 
       The four qualifying SUVs become available 2026-09-18, 11-10, 11-28 and
-      12-19; the dataset spans 2026-08-01 → 12-28, and only 47/203 listings
-      are available before September. So the headline demo still opens on
+      12-19; the dataset spans 2026-08-01 → 12-28, and only **45**/203
+      listings are available before September (this figure read "47" until
+      Phase D re-measured it — it had never been measured, which is §3's
+      lesson in miniature). So the headline demo still opens on
       the relaxation path — the exact outcome §3b set out to prevent, just
       via availability instead of price. **Behaviour is correct** (verified
       live: the agent relaxed availability, said so, and never fabricated),
@@ -408,8 +410,28 @@ decision for the user** and should be settled before Phase C starts.
       (b) leave the data and pick a demo target date of ~2027-01-01, which
       makes the happy path happy and costs nothing;
       (c) leave it and demo the relaxation deliberately as the AS2 story.
-- [ ] T022 [P] [US2] Snapshot test: A2UI catalogue JSON values equal source
+
+      **DECIDED (Phase D): option (b).** Re-measured across target dates,
+      SUV/≤$25k/buy matches 1 listing by 2026-09-30, 1 by 2026-10-31 and 4
+      by 2026-12-31, so a year-end demo date gives a full four-card
+      catalogue with no relaxation. Option (a) is deliberately *not* taken
+      yet: regenerating the dataset in the same pass that first renders it
+      would mean verifying two changes against each other at once. Revisit
+      after the catalogue is on screen and can be judged visually.
+- [x] T022 [P] [US2] Snapshot test: A2UI catalogue JSON values equal source
       tool-call record values exactly (Principle I / SC-002).
+      **DONE (Phase D)** — `agent-backend/tests/test_catalogue_grounding.py`
+      (24 tests). Every rendered value is normalised back to digits and
+      compared to its source record; `<untrusted_listing_data>` and the
+      hostile ADV-* payload are asserted absent from *every* string in the
+      surface, and `description` is asserted absent from the data model
+      entirely (not merely unrendered -- a field that reaches the client is
+      one `Text` binding from being displayed).
+      **Non-vacuity is asserted, as required**: each comparison increments a
+      counter checked against an independently computed expectation. Proven
+      to bite rather than assumed -- renaming one data key made 4 tests fail,
+      including the binding-resolution guard, so a silently-blank catalogue
+      cannot pass.
       **Also assert `<untrusted_listing_data>` appears in no rendered
       string.** `store.wrap_untrusted()` rewrites `description` for *every*
       consumer, including the artifact the deterministic ranker reads, so the
@@ -597,9 +619,45 @@ decision for the user** and should be settled before Phase C starts.
       snapshot test that silently matches nothing is worse than no test.
 
       ⚠️ **Dataset finding for T021/the demo — see the note under T021.**
-- [ ] T026 [US2] `agent-backend/agent/render_a2ui.py`: reasoning-steps
+- [x] T026 [US2] `agent-backend/agent/render_a2ui.py`: reasoning-steps
       surface (distinct from catalogue) + catalogue surface, both fed from
-      structured tool output only
+      structured tool output only. **DONE (Phase D).**
+      `research-reasoning` (Column → List of Row → Icon + Text, fed from
+      `ResearchOutcome.steps`) and `catalogue` (Column → List of Card →
+      Column of Text/Icon/Divider, fed only from
+      `SessionState.candidate_listings` + `.recommendations`). The
+      `{"type": "progress"}` placeholder is deleted; `_SurfaceStream` in
+      `api/main.py` decides init-vs-update per connection.
+      **Five findings, four of them only visible by looking at the screen:**
+      (a) **`Image` was specified by three docs and is unbuildable.** v0.9's
+      Image requires a `url`; no listing record has one. Rendering a stock or
+      invented URL is a Principle I breach in the exact surface T022 guards.
+      Dropped; `Icon` carries the visual structure instead.
+      (b) **A surface's root component must have id `root`.** The renderer
+      resolves the entry point by that well-known id, not by declaration
+      order. `catalogue_root` produced a surface that was created, populated
+      and permanently invisible ("[Loading root...]"). Regression-tested.
+      (c) **Catalog icon *names* are Material Symbols font ligatures.**
+      Without that font every icon renders as its own literal name -- the
+      first catalogue read "payment", "location_on", "calendar_today" down
+      the page. Switched to `Icon.name = {"svgPath": ...}`, which renders an
+      inline SVG: self-contained, offline-safe, no CDN, no committed binary.
+      (d) **A2UI output is themed only through `--a2ui-*` custom
+      properties** (the renderer writes inline styles that read them), and
+      `--a2ui-border` has no built-in fallback, so every card was borderless.
+      This -- not the broken `structural.css` export -- was why the surfaces
+      looked unstyled since M2. Fixed in `frontend/src/a2ui-theme.css`,
+      written against the DOM read off the running page: variants render as
+      a wrapper div *plus* a real heading element, and `caption` becomes
+      `<em>` with no class at all.
+      (e) **The narration duplicated the catalogue.** With cards on screen
+      the model's numbered re-listing was redundant and its markdown rendered
+      as literal asterisks. `narration_brief` now asks for 2-3 plain
+      sentences that add judgement rather than repeat the cards.
+      **Live-verified**: fresh session, real Groq, real MCP server -- all
+      three surfaces render, and all 16 catalogue values (4 listings ×
+      price/mileage/availability/location) plus every fit score are
+      byte-identical to `listings.json`.
 - [ ] T027 [US2] `mcp-apps-ui/listing-detail/`: optional MCP App iframe for
       single-listing deep-dive (the "marketplace access as MCP App" choice).
       **Recommended deferred past M4a/M4b**: this is the explicitly *additive

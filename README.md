@@ -15,11 +15,12 @@ Story 1) + M2.5 (audit remediation) complete. **M3 (research & ranked
 recommendations, User Story 2) is in progress** — the marketplace MCP server
 is built, the agent runs fully async against it, and interview → automatic
 research → deterministically ranked, explained recommendations now works end
-to end. Rendering those results as an **A2UI catalogue and reasoning-steps
-surface** is the remaining work.
+to end and **renders live as A2UI surfaces**: an interview checklist, a
+reasoning-steps trace of how the search ran, and a catalogue of ranked cards.
+Listing selection and the in-chat MCP Apps are the remaining M3/M4 work.
 
-**117 automated tests**, of which **114 run with no external setup at all**
-(35 `mcp-services` + 79 `agent-backend`); the remaining 3 need a live LLM key
+**141 automated tests**, of which **138 run with no external setup at all**
+(35 `mcp-services` + 103 `agent-backend`); the remaining 3 need a live LLM key
 and/or a running Phoenix and auto-skip without them. Plus live end-to-end
 verification against a real Docker Compose build. See
 [`specs/001-ai-car-matchmaker/`](specs/001-ai-car-matchmaker/) for the full

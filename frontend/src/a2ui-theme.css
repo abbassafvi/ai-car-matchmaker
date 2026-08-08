@@ -1,0 +1,167 @@
+/* Theme for the A2UI-rendered surfaces.
+ *
+ * @a2ui/react writes layout as inline styles whose every value is a CSS
+ * custom property with a fallback -- e.g.
+ *   border: var(--a2ui-card-border, var(--a2ui-border));
+ *   padding: var(--a2ui-card-padding, var(--a2ui-spacing-m, 16px));
+ * So the supported way to theme A2UI output is to define those properties;
+ * there is no class-based API. That is also why the package's broken
+ * "./styles/structural.css" export (HANDOFF §8.21) never broke layout:
+ * structure is inline, and only the theme was ever missing.
+ *
+ * `--a2ui-border` in particular has NO built-in fallback, so leaving it
+ * undefined resolves to nothing and every card renders borderless.
+ *
+ * The selectors below are written against the DOM @a2ui/react@0.10.2
+ * actually produces, which was read off the running page rather than
+ * assumed -- twice, because the first guess was wrong:
+ *   Text variant "h2"      -> <div class="h2"><h2>…</h2></div>
+ *   Text variant "body"    -> <div class="body">…</div>
+ *   Text variant "caption" -> <span><em>…</em></span>   (no "caption" class!)
+ * Caption becoming <em> is why the rank badge is styled via `em` below.
+ * The package version is lockfile-pinned, so this shape is stable; if it
+ * changes on upgrade the badge degrades to plain italic text rather than
+ * breaking the layout.
+ */
+
+/* --- document baseline ------------------------------------------------ */
+/* Without this the page inherits the browser's dark-mode UA defaults: a
+ * judge running dark mode saw a black chat panel against white A2UI cards.
+ * The demo should look identical regardless of the viewer's OS theme. */
+
+:root {
+  color-scheme: light;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+  background: #ffffff;
+  color: #1c2024;
+}
+
+/* --- A2UI custom properties ------------------------------------------- */
+
+:root {
+  --a2ui-color-surface: #ffffff;
+  --a2ui-color-on-surface: #1c2024;
+  --a2ui-color-primary: #0b63ce;
+  --a2ui-color-muted: #5b6672;
+  --a2ui-color-line: #dde3ea;
+
+  /* the un-fallbacked one */
+  --a2ui-border: 1px solid var(--a2ui-color-line);
+  --a2ui-border-radius: 10px;
+
+  --a2ui-spacing-s: 6px;
+  --a2ui-spacing-m: 12px;
+  --a2ui-spacing-l: 20px;
+  --a2ui-font-size-xl: 18px;
+
+  /* Cards: the default 16px margin stacks badly in a side panel. */
+  --a2ui-card-margin: 0 0 10px 0;
+  --a2ui-card-padding: 14px 16px;
+  --a2ui-card-border-radius: 10px;
+  --a2ui-card-box-shadow: 0 1px 2px rgba(16, 24, 40, 0.06);
+  --a2ui-card-background: var(--a2ui-color-surface);
+
+  /* Icon + label pairs want a small gap, not a 16px one. */
+  --a2ui-row-gap: 8px;
+  --a2ui-column-gap: 5px;
+  --a2ui-list-gap: 0px;
+
+  --a2ui-icon-size: 17px;
+  --a2ui-icon-color: var(--a2ui-color-muted);
+
+  --a2ui-checkbox-margin: 0;
+  --a2ui-checkbox-gap: 10px;
+  --a2ui-checkbox-size: 0.95rem;
+}
+
+/* --- text variants ---------------------------------------------------- */
+/* Real heading elements are nested inside the variant wrapper, so these
+ * element selectors reach them and beat the UA defaults. */
+
+.a2ui-surface h2 {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--a2ui-color-muted);
+  margin: 0 0 10px;
+}
+
+.a2ui-surface h3 {
+  font-size: 15.5px;
+  font-weight: 650;
+  color: var(--a2ui-color-on-surface);
+  margin: 0;
+  line-height: 1.3;
+}
+
+.a2ui-surface h4 {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--a2ui-color-primary);
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.a2ui-surface .body,
+.a2ui-surface p {
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--a2ui-color-on-surface);
+  margin: 0;
+}
+
+/* caption -> <em>. Muted and upright rather than italic. */
+.a2ui-surface em {
+  font-style: normal;
+  font-size: 11.5px;
+  color: var(--a2ui-color-muted);
+}
+
+/* --- cards ------------------------------------------------------------ */
+
+.a2ui-surface .a2ui-card {
+  transition: box-shadow 120ms ease, border-color 120ms ease;
+}
+
+.a2ui-surface .a2ui-card:hover {
+  box-shadow: 0 3px 10px rgba(16, 24, 40, 0.1);
+  border-color: #c3cdd9;
+}
+
+/* The rank badge: the first caption in a card's headline row. The row sits
+ * two divs deep inside the card, so this is a descendant selector, not a
+ * child one -- the child version silently matched nothing. */
+.a2ui-surface .a2ui-card span:first-child em {
+  display: inline-block;
+  min-width: 24px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: var(--a2ui-color-primary);
+  color: #ffffff;
+  font-weight: 700;
+  font-size: 11px;
+  text-align: center;
+}
+
+.a2ui-surface hr {
+  border: 0;
+  border-top: 1px solid var(--a2ui-color-line);
+  margin: 4px 0 8px;
+}
+
+.a2ui-surface svg {
+  flex: none;
+}
+
+/* The reasoning trace reads as a compact log, not a stack of cards. */
+.a2ui-surface[data-surface-id="research-reasoning"] .body {
+  font-size: 12.5px;
+  color: var(--a2ui-color-muted);
+}

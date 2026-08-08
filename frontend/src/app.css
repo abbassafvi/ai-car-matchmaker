@@ -1,0 +1,186 @@
+/* Chat shell. Kept separate from a2ui-theme.css, which exists purely to
+ * theme the agent-generated surfaces. */
+
+.app {
+  display: flex;
+  height: 100vh;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+    "Helvetica Neue", Arial, sans-serif;
+  color: #1c2024;
+  background: #ffffff;
+}
+
+/* --- chat column ------------------------------------------------------ */
+
+.chat {
+  flex: 1 1 46%;
+  min-width: 320px;
+  display: flex;
+  flex-direction: column;
+  padding: 18px 20px 16px;
+  border-right: 1px solid #e4e9ef;
+  background: #ffffff;
+  min-height: 0;
+}
+
+.chat-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0 0 14px;
+}
+
+.chat-title {
+  font-size: 17px;
+  font-weight: 700;
+  margin: 0;
+  letter-spacing: -0.01em;
+}
+
+.chat-status {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 3px 9px;
+  border-radius: 999px;
+  background: #eef7ee;
+  color: #216c2a;
+  border: 1px solid #cfe7d1;
+}
+
+.chat-status[data-connected="false"] {
+  background: #fdeeee;
+  color: #a3242b;
+  border-color: #f2cdcf;
+}
+
+.chat-log {
+  flex: 1;
+  overflow-y: auto;
+  min-height: 0;
+  padding-right: 4px;
+}
+
+.chat-empty {
+  color: #7b8794;
+  font-size: 13.5px;
+  line-height: 1.6;
+  margin-top: 8px;
+}
+
+.chat-row {
+  display: flex;
+  margin: 10px 0;
+}
+
+.chat-row[data-role="user"] {
+  justify-content: flex-end;
+}
+
+.chat-bubble {
+  max-width: 82%;
+  padding: 9px 13px;
+  border-radius: 14px;
+  font-size: 13.5px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.chat-row[data-role="user"] .chat-bubble {
+  background: #0b63ce;
+  color: #ffffff;
+  border-bottom-right-radius: 5px;
+}
+
+.chat-row[data-role="assistant"] .chat-bubble {
+  background: #f1f4f8;
+  color: #1c2024;
+  border-bottom-left-radius: 5px;
+}
+
+/* --- composer --------------------------------------------------------- */
+
+.composer {
+  display: flex;
+  gap: 8px;
+  padding-top: 12px;
+  border-top: 1px solid #e4e9ef;
+}
+
+.composer input {
+  flex: 1;
+  padding: 10px 12px;
+  font-size: 13.5px;
+  font-family: inherit;
+  color: inherit;
+  background: #ffffff;
+  border: 1px solid #d3dae2;
+  border-radius: 9px;
+  outline: none;
+}
+
+.composer input:focus {
+  border-color: #0b63ce;
+  box-shadow: 0 0 0 3px rgba(11, 99, 206, 0.12);
+}
+
+.composer button {
+  padding: 10px 18px;
+  font-size: 13.5px;
+  font-weight: 600;
+  font-family: inherit;
+  color: #ffffff;
+  background: #0b63ce;
+  border: 0;
+  border-radius: 9px;
+  cursor: pointer;
+}
+
+.composer button:hover {
+  background: #0a55b0;
+}
+
+.composer button:disabled {
+  background: #b6c2d0;
+  cursor: not-allowed;
+}
+
+/* --- surfaces column -------------------------------------------------- */
+
+.surfaces {
+  flex: 1 1 54%;
+  min-width: 300px;
+  padding: 18px 20px;
+  overflow-y: auto;
+  background: #f6f8fa;
+}
+
+.surfaces-empty {
+  color: #7b8794;
+  font-size: 13px;
+}
+
+.a2ui-surface {
+  margin-bottom: 22px;
+}
+
+/* Narrow viewports (and the in-app preview pane) stack rather than
+   squeezing two columns into ~250px each. */
+@media (max-width: 900px) {
+  .app {
+    flex-direction: column;
+    height: auto;
+    min-height: 100vh;
+  }
+
+  .chat {
+    flex: none;
+    border-right: 0;
+    border-bottom: 1px solid #e4e9ef;
+    height: 62vh;
+  }
+
+  .surfaces {
+    flex: none;
+  }
+}

@@ -48,11 +48,25 @@ class ResearchOutcome:
     query: dict[str, Any] = field(default_factory=dict)
     relaxed: list[str] = field(default_factory=list)
     steps: list[str] = field(default_factory=list)
+    # Parallel to `steps`, one semantic kind per step. It exists so the A2UI
+    # reasoning surface (T026) can choose an icon per step without parsing
+    # the step's prose -- a renderer that sniffed strings for "No matches"
+    # would silently mislabel the trace the first time the wording changed.
+    # `steps` stays a plain list[str] because it is also the model-facing
+    # and test-facing form.
+    step_kinds: list[str] = field(default_factory=list)
     error: Optional[str] = None
 
     @property
     def found(self) -> bool:
         return bool(self.listings)
+
+    def add_step(self, kind: str, text: str) -> None:
+        """Record one reasoning step and its kind, keeping the two lists in
+        lockstep. Always use this rather than appending to `steps` directly.
+        """
+        self.steps.append(text)
+        self.step_kinds.append(kind)
 
 
 def query_from_interview(interview: dict[str, Any]) -> dict[str, Any]:
@@ -152,14 +166,15 @@ async def run_research(
     """
     search = next((t for t in tools if t.name == SEARCH_TOOL), None)
     if search is None:
-        return ResearchOutcome(
+        unavailable = ResearchOutcome(
             error="The marketplace search tool is not available right now.",
-            steps=["Marketplace unavailable — no search could be run."],
         )
+        unavailable.add_step("error", "Marketplace unavailable — no search could be run.")
+        return unavailable
 
     query = query_from_interview(interview)
     outcome = ResearchOutcome(query=query)
-    outcome.steps.append(_describe_query(query))
+    outcome.add_step("search", _describe_query(query))
 
     try:
         structured = await _call_search(search, query, slate_size)
@@ -171,7 +186,9 @@ async def run_research(
             if widened is None:
                 continue
             outcome.relaxed.append(step)
-            outcome.steps.append(f"No matches — relaxing the {label} and searching again.")
+            outcome.add_step(
+                "relax", f"No matches — relaxing the {label} and searching again."
+            )
             query = widened
             structured = await _call_search(search, query, slate_size)
 
@@ -180,19 +197,22 @@ async def run_research(
     except Exception as exc:
         log.exception("Research failed")
         outcome.error = str(exc)
-        outcome.steps.append("Search failed — no results could be retrieved.")
+        outcome.add_step("error", "Search failed — no results could be retrieved.")
         return outcome
 
     if not outcome.listings:
-        outcome.steps.append("Still no matches after relaxing every constraint.")
+        outcome.add_step("empty", "Still no matches after relaxing every constraint.")
         return outcome
 
-    outcome.steps.append(f"Found {len(outcome.listings)} matching listings — ranking them.")
+    outcome.add_step(
+        "found", f"Found {len(outcome.listings)} matching listings — ranking them."
+    )
     outcome.recommendations = rank(outcome.listings, interview)
     outcome.listings = order_listings_by(outcome.listings, outcome.recommendations)
-    outcome.steps.append(
+    outcome.add_step(
+        "top",
         f"Top pick: {outcome.recommendations[0].listing_id} "
-        f"(fit {outcome.recommendations[0].fit_score:.2f})."
+        f"(fit {outcome.recommendations[0].fit_score:.2f}).",
     )
     return outcome
 
@@ -262,8 +282,20 @@ def narration_brief(outcome: ResearchOutcome) -> str:
 
     lines += [
         "",
-        "Present these to the user in rank order, briefly, tying each to what "
-        "they said they needed. Use ONLY the numbers above -- do not compute, "
-        "round, or add any value that is not printed here.",
+        # The A2UI catalogue (T026) is already on screen beside the chat,
+        # showing every listing as a card with price, specs, availability,
+        # source and the ranker's own reasoning. Before Phase D there was no
+        # catalogue, so the model re-listing everything was the only way the
+        # user saw it; now it duplicates the cards and buries the chat in a
+        # numbered list. Ask for the part a card cannot give: the judgement.
+        "IMPORTANT: the user can already SEE all of these listings as cards "
+        "next to this chat, with prices, specs, availability and reasoning. "
+        "Do NOT re-list them or repeat their numbers.",
+        "Instead write 2-3 short sentences: say how many matched, name your "
+        "top pick and why it suits what they told you, and invite them to "
+        "ask about any of them. Plain sentences only -- no markdown, no "
+        "bullet points, no asterisks, no numbered lists.",
+        "If you do mention a number, it must appear verbatim above -- never "
+        "compute, round, or add one.",
     ]
     return "\n".join(lines)

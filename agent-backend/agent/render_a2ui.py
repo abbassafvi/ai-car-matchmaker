@@ -25,7 +25,7 @@ from __future__ import annotations
 from enum import Enum
 from typing import Any
 
-from agent.ranking import applicable_price, money
+from agent.ranking import applicable_price, money, price_unit
 from agent.state import InterviewState, RankedRecommendation
 
 CATALOG_ID = "https://a2ui.org/specification/v0_9/catalogs/basic/catalog.json"
@@ -377,7 +377,9 @@ def _catalogue_rows(
     for position, listing in enumerate(listings, start=1):
         rec = by_id.get(listing["id"])
         price = applicable_price(listing, transaction_type)
-        unit = "/day" if transaction_type == "rent" else ""
+        # Per listing, not per query -- a "both" slate holds both bases, and
+        # a daily rate shown without "/day" is a number the user cannot act on.
+        unit = price_unit(listing, transaction_type)
 
         rows.append({
             # Carried for Phase E's Button action context; not rendered.

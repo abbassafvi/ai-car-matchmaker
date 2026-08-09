@@ -233,3 +233,59 @@ def test_the_retired_adv_0002_route_still_does_not_work():
         h["id"] for h in store.search(category="SUV", budget_max=31000,
                                       transaction_type="buy", limit=SLATE)
     ]
+
+
+# --- "both" must not collapse into "buy" ---------------------------------
+#
+# Reported from a live run: the user asked for buy *or* rent and the slate
+# came back all-buy. `_price_for` fell through to the sale price for
+# `transaction_type="both"`, so a rent-only car was hard-filtered on a price
+# the user was never going to pay, and then displayed at that price.
+
+def test_both_judges_a_rent_only_listing_on_its_daily_rate():
+    """A car whose SALE price busts the budget is still a valid rental."""
+    listings = [{
+        "id": "R-1", "category": "SUV", "transaction_type": "rent",
+        "price": 32585, "rent_price_per_day": 130,
+        "availability_date": "2026-09-01", "year": 2023, "mileage": 10531,
+    }]
+    # Judged on the sale price this is excluded; on the daily rate it is not.
+    assert store.search(
+        category="SUV", budget_max=25000, transaction_type="both", listings=listings
+    ), "a $130/day rental was dropped because its sale price was $32,585"
+    assert not store.search(
+        category="SUV", budget_max=25000, transaction_type="buy", listings=listings
+    ), "a rent-only listing must never answer a buy-only search"
+
+
+def test_both_returns_a_mix_rather_than_one_basis():
+    """The slate must contain both routes, not whichever sorts smaller.
+
+    A single cheapest-first sort cannot span the two bases -- daily rates are
+    orders of magnitude below sale prices, so an unguarded sort returns
+    all-rentals for the same reason the old filter returned all-buys.
+    """
+    listings = [
+        {"id": f"B-{i}", "category": "SUV", "transaction_type": "buy",
+         "price": 10000 + i, "availability_date": "2026-09-01"}
+        for i in range(5)
+    ] + [
+        {"id": f"R-{i}", "category": "SUV", "transaction_type": "rent",
+         "price": 90000, "rent_price_per_day": 50 + i,
+         "availability_date": "2026-09-01"}
+        for i in range(5)
+    ]
+    slate = store.search(
+        category="SUV", budget_max=25000, transaction_type="both",
+        limit=5, listings=listings,
+    )
+    kinds = {l["transaction_type"] for l in slate}
+    assert kinds == {"buy", "rent"}, f"expected a mix, got {kinds}"
+
+
+def test_price_basis_follows_the_listing_not_only_the_query():
+    rent_only = {"id": "R", "transaction_type": "rent", "price": 1, "rent_price_per_day": 2}
+    buyable = {"id": "B", "transaction_type": "both", "price": 1, "rent_price_per_day": 2}
+    assert store.price_basis(rent_only, "both") == "rent"
+    assert store.price_basis(buyable, "both") == "buy"
+    assert store.price_basis(buyable, "rent") == "rent"

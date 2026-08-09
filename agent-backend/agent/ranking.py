@@ -30,16 +30,40 @@ from agent.state import RankedRecommendation
 WEIGHTS = {"value": 0.45, "recency": 0.30, "mileage": 0.25}
 
 
-def applicable_price(listing: dict[str, Any], transaction_type: str | None) -> Optional[float]:
-    """The price that a budget for `transaction_type` compares against.
+def price_basis(listing: dict[str, Any], transaction_type: str | None) -> str:
+    """"buy" or "rent" -- which price this listing is being judged on.
 
-    Mirrors `mcp-services/marketplace/store._price_for`. The duplication is
+    Mirrors `mcp-services/marketplace/store.price_basis`. The duplication is
     intentional and is the cost of the MCP boundary: the two services are
     separate deployables that share a protocol, not a codebase. Keep them in
     step -- a divergence here would rank against a different number than the
     server filtered on.
+
+    The listing matters as much as the request. Under "both" the slate holds
+    sale-only cars, rent-only cars and cars offered either way, so the query
+    alone cannot say which number applies.
     """
     if transaction_type == "rent":
+        return "rent"
+    if transaction_type == "both" and listing.get("transaction_type") not in ("buy", "both"):
+        return "rent"
+    return "buy"
+
+
+def price_unit(listing: dict[str, Any], transaction_type: str | None) -> str:
+    """"/day" when this listing is priced as a rental, else "".
+
+    Per listing, not per query, which is the bit that was wrong: the suffix
+    used to be `"/day" if transaction_type == "rent" else ""`, so in a
+    "both" search a rent-only car was shown at a *sale* price with no unit
+    on it -- a number the user could not act on, presented as if they could.
+    """
+    return "/day" if price_basis(listing, transaction_type) == "rent" else ""
+
+
+def applicable_price(listing: dict[str, Any], transaction_type: str | None) -> Optional[float]:
+    """The price that a budget for `transaction_type` compares against."""
+    if price_basis(listing, transaction_type) == "rent":
         return listing.get("rent_price_per_day")
     return listing.get("price")
 
@@ -88,14 +112,26 @@ def _reasoning(listing: dict[str, Any], interview: dict[str, Any]) -> str:
     price = applicable_price(listing, transaction_type)
     budget_max = interview.get("budget_max")
 
-    unit = "/day" if transaction_type == "rent" else ""
+    unit = price_unit(listing, transaction_type)
     parts = [
         f"{listing['year']} {listing['brand']} {listing['model']} "
         f"at {_money(price)}{unit}" if price is not None
         else f"{listing['year']} {listing['brand']} {listing['model']}"
     ]
 
-    if price is not None and budget_max is not None:
+    # Only compare against the budget when the two are the same *kind* of
+    # number. A single `budget_max` carries no basis of its own, so under
+    # "both" it can only be read as the purchase budget the user almost
+    # certainly stated -- and subtracting a daily rate from it produces
+    # "$130/day — $24,870 under your $25,000 budget", which is arithmetic
+    # performed on two unrelated quantities and presented to the user as a
+    # fact. Saying nothing about headroom is the honest alternative; the
+    # rate itself is still shown, and it is still a real number off the
+    # record.
+    budget_comparable = price_basis(listing, transaction_type) == (
+        "rent" if transaction_type == "rent" else "buy"
+    )
+    if price is not None and budget_max is not None and budget_comparable:
         headroom = budget_max - price
         if headroom >= 0:
             parts.append(f"{_money(headroom)} under your {_money(budget_max)} budget")
@@ -145,15 +181,35 @@ def rank(
         fallback = worst(present) if present else 0.0
         return [float(v) if v is not None else float(fallback) for v in values]
 
-    value_basis = _filled(prices, max)
-    if budget_max:
-        # Headroom against the stated budget, when we have one: it answers
-        # "how much of my budget does this leave me?" rather than merely
-        # "which of these is cheapest".
-        value_basis = [budget_max - price for price in value_basis]
-        value_scores = _normalise(value_basis, higher_is_better=True)
-    else:
-        value_scores = _normalise(value_basis, higher_is_better=False)
+    # Value is scored WITHIN a price basis, never across one.
+    #
+    # A "both" slate mixes sale prices with daily rates, and the two are one
+    # or two orders of magnitude apart. Scored together, `budget_max - price`
+    # hands every rental almost the entire budget as headroom, so every
+    # rental beats every purchase on the dimension that carries the most
+    # weight -- the ranking would be sorted by price basis with the actual
+    # comparison buried inside it. Normalising each group against its own
+    # peers makes "good value for a rental" and "good value for a purchase"
+    # comparable numbers, which is what a mixed slate needs.
+    bases = [price_basis(l, transaction_type) for l in listings]
+    filled = _filled(prices, max)
+    value_scores = [0.5] * len(listings)
+    for basis in ("buy", "rent"):
+        idx = [i for i, b in enumerate(bases) if b == basis]
+        if not idx:
+            continue
+        group = [filled[i] for i in idx]
+        if budget_max:
+            # Headroom against the stated budget, when we have one: it
+            # answers "how much of my budget does this leave me?" rather
+            # than merely "which of these is cheapest".
+            group_scores = _normalise(
+                [budget_max - price for price in group], higher_is_better=True
+            )
+        else:
+            group_scores = _normalise(group, higher_is_better=False)
+        for position, i in enumerate(idx):
+            value_scores[i] = group_scores[position]
 
     recency_scores = _normalise(_filled(years, min), higher_is_better=True)
     mileage_scores = _normalise(_filled(mileages, max), higher_is_better=False)

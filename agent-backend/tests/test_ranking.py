@@ -145,3 +145,59 @@ def test_order_listings_by_aligns_records_with_the_ranking():
     assert [l["id"] for l in ordered] == [r.listing_id for r in recs]
     # And the records are the same objects, not copies with derived values.
     assert ordered[0] in slate
+
+
+# --- mixed-basis slates ("both") -----------------------------------------
+
+def _buy(i, price):
+    return {"id": f"B-{i}", "transaction_type": "buy", "price": price,
+            "year": 2022, "mileage": 40000, "brand": "Kia", "model": "X"}
+
+
+def _rent(i, rate):
+    return {"id": f"R-{i}", "transaction_type": "rent", "price": 90000,
+            "rent_price_per_day": rate, "year": 2022, "mileage": 40000,
+            "brand": "Kia", "model": "X"}
+
+
+def test_price_unit_follows_the_listing_not_the_query():
+    """A rent-only car in a "both" slate is a per-day price, and must say so.
+
+    The suffix used to be `"/day" if transaction_type == "rent"`, i.e. keyed
+    on the query, so under "both" a daily rate was rendered as a bare dollar
+    amount -- indistinguishable from a sale price on the card.
+    """
+    from agent.ranking import applicable_price, price_unit
+
+    assert price_unit(_rent(1, 130), "both") == "/day"
+    assert applicable_price(_rent(1, 130), "both") == 130
+    assert price_unit(_buy(1, 17391), "both") == ""
+    assert applicable_price(_buy(1, 17391), "both") == 17391
+
+
+def test_value_is_scored_within_a_basis_not_across_it():
+    """Rentals must not sweep the top purely for being smaller numbers.
+
+    Scored together against a purchase budget, `budget_max - price` gives a
+    $54/day rental ~$24,946 of "headroom" and a $17,391 car ~$7,609, so every
+    rental outranks every purchase on the heaviest-weighted dimension.
+    """
+    from agent.ranking import rank
+
+    listings = [_buy(i, 10000 + i * 1000) for i in range(3)] + \
+               [_rent(i, 50 + i * 10) for i in range(3)]
+    ranked = rank(listings, {"transaction_type": "both", "budget_max": 25000})
+    top3 = {r.listing_id[0] for r in ranked[:3]}
+    assert top3 == {"B", "R"}, f"one basis swept the top of the slate: {top3}"
+
+
+def test_headroom_is_not_stated_across_price_bases():
+    """"$130/day — $24,870 under your $25,000 budget" is two unrelated numbers."""
+    from agent.ranking import rank
+
+    ranked = rank([_rent(1, 130)], {"transaction_type": "both", "budget_max": 25000})
+    assert "/day" in ranked[0].reasoning
+    assert "under your" not in ranked[0].reasoning, ranked[0].reasoning
+
+    ranked_buy = rank([_buy(1, 17391)], {"transaction_type": "both", "budget_max": 25000})
+    assert "under your" in ranked_buy[0].reasoning

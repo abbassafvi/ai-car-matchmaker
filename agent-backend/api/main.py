@@ -1181,7 +1181,17 @@ async def chat_ws(websocket: WebSocket, session_id: str):
             # One inbound message can now produce several outbound ones: the
             # interview reply above, then a reasoning trace, a catalogue and
             # a narration.
-            if Phase(session["phase"]) == Phase.RESEARCHING:
+            #
+            # If the agent already called `refine_search` inside its turn
+            # (which does the search + narration brief in one shot), the
+            # session already has updated candidate_listings and a phase
+            # that may be RESEARCHING. Running `_run_research_turn` again
+            # would duplicate the search and add an unnecessary LLM
+            # narration call (~5-8s). Skip it when listings are already
+            # present — the catalogue was already refreshed by
+            # `_refresh_refined_surfaces` above.
+            has_candidates = bool(session.get("candidate_listings"))
+            if Phase(session["phase"]) == Phase.RESEARCHING and not has_candidates:
                 try:
                     session = await _run_research_turn(
                         websocket, agents, session, config, surfaces

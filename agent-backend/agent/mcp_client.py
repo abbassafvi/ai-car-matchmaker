@@ -30,6 +30,7 @@ log = logging.getLogger(__name__)
 
 DEFAULT_MARKETPLACE_URL = "http://localhost:8100/mcp"
 DEFAULT_BOOKING_URL = "http://localhost:8100/booking/mcp"
+DEFAULT_PAYMENT_URL = "http://localhost:8100/payment/mcp"
 
 # The tools we expect the marketplace server to expose. Discovery returning
 # something *other* than this is worth a warning rather than a silent pass:
@@ -48,6 +49,18 @@ EXPECTED_MARKETPLACE_TOOLS = {"search_listings", "get_listing_details"}
 # and reached only by backend code: `agent/tools.py::build_booking_tools`
 # closes over them, and the MCP App bridge calls `submit_booking` directly.
 EXPECTED_BOOKING_TOOLS = {"open_booking_form", "submit_booking"}
+
+# The payment server's tools (M4b). ⚠️ Same rule as the booking tools, and
+# the stakes are higher: `TOOLS_BY_PHASE[AWAITING_PAYMENT]` names
+# `open_mock_checkout`, so injecting the raw MCP tools would replace the
+# local wrapper with one whose schema is `{booking, listing}` **required**
+# -- the model retyping the price it is about to charge, which is
+# Principle I inverted in the one place it matters most. And
+# `confirm_mock_payment` would arrive bound to nothing but present in the
+# registry, one gate-table edit away from being callable with card-like
+# arguments (Principle III). Discovered separately, kept out of
+# `extra_tools`, reached only by backend code.
+EXPECTED_PAYMENT_TOOLS = {"open_mock_checkout", "confirm_mock_payment"}
 
 
 async def _discover(label: str, endpoint: str, expected: set[str]) -> list:
@@ -99,11 +112,34 @@ async def discover_booking_tools(url: str | None = None) -> list:
     return await _discover("booking", endpoint, EXPECTED_BOOKING_TOOLS)
 
 
+async def discover_payment_tools(url: str | None = None) -> list:
+    """Adapted LangChain tools for the payment MCP server, or `[]`.
+
+    A third list rather than a merge, for the reason recorded on
+    `EXPECTED_PAYMENT_TOOLS`: three servers with three different
+    privileges. Marketplace tools are model-facing and injected; booking
+    and payment tools are not, and are reached only through local
+    wrappers or the App bridge.
+    """
+    endpoint = url or os.environ.get("MCP_PAYMENT_URL", DEFAULT_PAYMENT_URL)
+    return await _discover("payment", endpoint, EXPECTED_PAYMENT_TOOLS)
+
+
 FORM_RESOURCE_URI = "ui://booking/form.html"
+CHECKOUT_RESOURCE_URI = "ui://payment/checkout.html"
+
+# Which server serves which `ui://` resource. A resource read has to go to
+# the server that declares it, and the two live behind different env vars
+# -- so this is a lookup rather than a default argument, which is what
+# `read_form_resource` used to have when booking was the only App.
+APP_RESOURCE_ENDPOINTS = {
+    FORM_RESOURCE_URI: ("MCP_BOOKING_URL", DEFAULT_BOOKING_URL),
+    CHECKOUT_RESOURCE_URI: ("MCP_PAYMENT_URL", DEFAULT_PAYMENT_URL),
+}
 
 
-async def read_form_resource(uri: str = FORM_RESOURCE_URI, url: str | None = None) -> dict[str, Any]:
-    """Fetch the booking MCP App's `ui://` resource, **keeping its `_meta`**.
+async def read_app_resource(uri: str, url: str | None = None) -> dict[str, Any]:
+    """Fetch an MCP App's `ui://` resource, **keeping its `_meta`**.
 
     Deliberately not `MultiServerMCPClient.get_resources()`, which is the
     obvious call and the wrong one. Measured against the live server: the
@@ -114,10 +150,19 @@ async def read_form_resource(uri: str = FORM_RESOURCE_URI, url: str | None = Non
         {"ui": {"csp": {"connectDomains": [], "resourceDomains": []},
                 "permissions": {}}}
 
-    -- which is spec.md US3 AS1's actual requirement and the whole reason
-    `booking/server.py` declares it on the resource rather than the tool.
-    It does survive the wire: `read_resource()`'s `contents[0].meta` has it.
-    So this drops to a raw `ClientSession` for one call.
+    -- which is spec.md US3 AS1's (and US4 AS1's) actual requirement and
+    the whole reason both App servers declare it on the resource rather
+    than the tool. It does survive the wire: `read_resource()`'s
+    `contents[0].meta` has it. So this drops to a raw `ClientSession` for
+    one call.
+
+    `uri` is required and the endpoint is looked up from it. This was
+    `read_form_resource(uri=FORM_RESOURCE_URI, url=None)` while booking
+    was the only App, which read fine and hid a trap: the default
+    endpoint was `MCP_BOOKING_URL`, so calling it for the checkout
+    resource would have asked the *booking* server for a document it does
+    not serve. A defaulted URI plus a defaulted endpoint that must agree
+    is two defaults one edit apart from disagreeing silently.
 
     Nothing would have failed if we had used the adapter. The form carries
     its own `default-src 'none'` meta tag and Phase D sandboxes the iframe,
@@ -134,7 +179,18 @@ async def read_form_resource(uri: str = FORM_RESOURCE_URI, url: str | None = Non
     from mcp import ClientSession
     from mcp.client.streamable_http import streamablehttp_client
 
-    endpoint = url or os.environ.get("MCP_BOOKING_URL", DEFAULT_BOOKING_URL)
+    if url is None:
+        try:
+            env_var, fallback = APP_RESOURCE_ENDPOINTS[uri]
+        except KeyError:
+            raise ValueError(
+                f"no MCP server is registered for {uri!r} -- add it to "
+                f"APP_RESOURCE_ENDPOINTS. Guessing an endpoint would ask one "
+                f"App's server for another App's document."
+            ) from None
+        endpoint = os.environ.get(env_var, fallback)
+    else:
+        endpoint = url
 
     async with streamablehttp_client(endpoint) as (read, write, _):
         async with ClientSession(read, write) as session:

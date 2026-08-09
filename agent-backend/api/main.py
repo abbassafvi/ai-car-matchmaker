@@ -57,7 +57,8 @@ from agent.mcp_client import (  # noqa: E402
     call_structured,
     discover_booking_tools,
     discover_marketplace_tools,
-    read_form_resource,
+    discover_payment_tools,
+    read_app_resource,
 )
 from agent.render_a2ui import (  # noqa: E402
     CATALOGUE_SURFACE_ID,
@@ -81,7 +82,9 @@ from agent.state import (  # noqa: E402
     SessionState,
 )
 from agent.tools import (  # noqa: E402
+    CONFIRM_MOCK_PAYMENT_TOOL,
     OPEN_BOOKING_FORM_TOOL,
+    OPEN_MOCK_CHECKOUT_TOOL,
     SUBMIT_BOOKING_TOOL,
     build_runtime_tools,
 )
@@ -127,9 +130,11 @@ async def lifespan(app: FastAPI):
     # arguments -- see agent/tools.py::build_booking_tools.
     marketplace_tools = await discover_marketplace_tools()
     booking_tools = await discover_booking_tools()
+    payment_tools = await discover_payment_tools()
     app.state.marketplace_tools = marketplace_tools
     app.state.booking_tools = booking_tools
-    runtime_tools = build_runtime_tools(marketplace_tools, booking_tools)
+    app.state.payment_tools = payment_tools
+    runtime_tools = build_runtime_tools(marketplace_tools, booking_tools, payment_tools)
 
     Path(DB_PATH).parent.mkdir(parents=True, exist_ok=True)
     async with AsyncSqliteSaver.from_conn_string(DB_PATH) as checkpointer:
@@ -147,6 +152,33 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(lifespan=lifespan)
 
+# The four things that must all be true for the stack to be "ok".
+#
+# A named function rather than an inline expression, and that is not
+# tidying. Mutation testing in M4b found that deleting `payment_connected`
+# from the composite left the entire suite green: every unit test that
+# reaches /health has *all* the downstreams unreachable, so `status` is
+# "degraded" whatever the expression says, and the contribution of any
+# single flag is invisible. One-server-down is the case that matters --
+# and standing up two real MCP servers to assert a boolean is the wrong
+# trade. Extracted, the truth table is testable directly, which is what
+# `test_health_status_degrades_on_any_single_outage` does.
+HEALTH_SIGNALS = ("llm_configured", "mcp_connected", "booking_connected", "payment_connected")
+
+
+def health_status(**signals: bool) -> str:
+    """"ok" only when every signal in HEALTH_SIGNALS is true.
+
+    Keyword-only and explicit about its inputs so that adding a fourth
+    downstream (T027's listing-detail server, if it ever lands) is a
+    change to `HEALTH_SIGNALS` rather than to an `and` chain someone has
+    to read carefully.
+    """
+    missing = set(HEALTH_SIGNALS) - set(signals)
+    if missing:
+        raise ValueError(f"health_status is missing signal(s): {sorted(missing)}")
+    return "ok" if all(signals[name] for name in HEALTH_SIGNALS) else "degraded"
+
 
 @app.get("/health")
 async def health():
@@ -163,6 +195,7 @@ async def health():
     configured = app.state.agents is not None
     tools = getattr(app.state, "marketplace_tools", []) or []
     booking = getattr(app.state, "booking_tools", []) or []
+    payment = getattr(app.state, "payment_tools", []) or []
     mcp_connected = any(tool.name == SEARCH_TOOL for tool in tools)
     # Reported separately rather than folded into `mcp_connected`, which
     # every M0-M3 caller and test reads as "the marketplace is reachable".
@@ -171,15 +204,26 @@ async def health():
     # nameable cause. `status` degrades on either, so the composite still
     # tells the truth (§14 finding 10).
     booking_connected = any(tool.name == OPEN_BOOKING_FORM_TOOL for tool in booking)
+    # A third field for the same reason there is a second: folding payment
+    # into `booking_connected` would make one green signal mean two things,
+    # and a checkout outage would present as "booking is broken".
+    payment_connected = any(tool.name == OPEN_MOCK_CHECKOUT_TOOL for tool in payment)
     return {
-        "status": "ok" if (configured and mcp_connected and booking_connected) else "degraded",
+        "status": health_status(
+            llm_configured=configured,
+            mcp_connected=mcp_connected,
+            booking_connected=booking_connected,
+            payment_connected=payment_connected,
+        ),
         "service": "agent-backend",
         "llm_configured": configured,
         "tracing_enabled": getattr(app.state, "tracing_enabled", False),
         "mcp_connected": mcp_connected,
         "booking_connected": booking_connected,
+        "payment_connected": payment_connected,
         "marketplace_tools": sorted(tool.name for tool in tools),
         "booking_tools": sorted(tool.name for tool in booking),
+        "payment_tools": sorted(tool.name for tool in payment),
     }
 
 
@@ -407,7 +451,7 @@ async def build_booking_app_envelope(booking_tools: list, session: dict) -> dict
 
     - **`resource`** — the `ui://` document *and its `_meta`*, which is
       where the deny-by-default CSP lives (spec.md US3 AS1). Read through
-      `read_form_resource`, not the LangChain adapter, which drops `_meta`.
+      `read_app_resource`, not the LangChain adapter, which drops `_meta`.
     - **`toolInput`** — ext-apps 1.7.5 states `sendToolInput` "is sent
       exactly once and is **required before** `sendToolResult`", so a host
       that only forwards the result leaves the View waiting forever.
@@ -431,7 +475,7 @@ async def build_booking_app_envelope(booking_tools: list, session: dict) -> dict
     payload = await call_structured(
         _booking_tool(booking_tools, OPEN_BOOKING_FORM_TOOL), {"listing": listing},
     )
-    resource = await read_form_resource(payload["resourceUri"])
+    resource = await read_app_resource(payload["resourceUri"])
 
     return {
         "type": "mcp_app",

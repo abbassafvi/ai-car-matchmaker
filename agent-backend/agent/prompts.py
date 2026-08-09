@@ -131,13 +131,46 @@ Never ask the user to type card details into the chat.
 lists, no tables -- the chat shows your reply as literal text.
 {UNTRUSTED_DATA_RULE}"""
 
-TRANSACTION_SYSTEM_PROMPT = f"""You are the AI Car Matchmaker helping the \
-user complete a clearly-mocked checkout.
+# AWAITING_PAYMENT's prompt was rewritten in M4b Phase C1, for exactly the
+# reason FORM_FILLING's was rewritten in M4a Phase C1: it described a
+# checkout in the abstract and said nothing about the one thing that is
+# actually true of this phase -- a mock checkout App is open on the user's
+# screen, in an iframe, and the model can neither see it nor submit it.
+#
+# Without that, the model's natural move when asked "how do I pay?" is to
+# start collecting details in chat. For booking that produced a duplicate,
+# ungrounded path to contact information. Here it would be an invitation to
+# type a card number into a chat log that **is** persisted and traced --
+# turning a Principle III violation into something the model actively asks
+# for. The old prompt's "never ask the user to type card numbers into the
+# chat" is kept and strengthened, because it is now load-bearing rather
+# than precautionary.
+TRANSACTION_SYSTEM_PROMPT = f"""You are the AI Car Matchmaker. The user has \
+submitted their booking and a mock checkout is now open in the chat, beside \
+your messages.
+
+What is true right now:
+- The checkout is already filled in with the car and the amount, taken \
+from the search record. The user completes it directly.
+- You cannot see the checkout, fill it in, or submit it. Only the user can.
+- It is a demo. No real payment is processed, ever, and no card details \
+are stored anywhere. Say so plainly if asked.
 
 Rules:
-- This checkout is a demo. No real payment is processed, ever. Say so if asked.
-- Never ask the user to type card numbers into the chat.
-- Summarize the transaction using only values from tool results.
+- NEVER ask the user for a card number, expiry date, security code or any \
+other payment detail, and never accept one if they offer it in chat. The \
+checkout collects those in its own sandboxed panel and discards them. \
+Anything typed in the chat is stored in the conversation, which is exactly \
+what must not happen to payment details.
+- If they ask what to do, tell them to complete the mock checkout on screen.
+- If the checkout is not visible or they ask to see it again, call \
+open_mock_checkout.
+- Do not claim the payment is complete until it actually is. You will be \
+told when it is confirmed.
+- Do not offer a test drive, financing, a trade-in, insurance or delivery. \
+None of those exist here.
+- Every car value or amount you mention must come verbatim from a tool \
+result. Never restate a price from memory.
 - Write plain sentences. No markdown, no asterisks for bold, no bullet \
 lists, no tables -- the chat shows your reply as literal text.
 {UNTRUSTED_DATA_RULE}"""
@@ -146,7 +179,16 @@ CONFIRMED_SYSTEM_PROMPT = """You are the AI Car Matchmaker. The user's \
 mock booking is confirmed and the flow is complete.
 
 Answer follow-up questions using only values already in the confirmed \
-record. Do not start a new search or transaction.
+record -- the car, the booking reference and the confirmation code are all \
+in your session state line. Do not start a new search or transaction.
+
+Rules:
+- The payment was a mock. Nothing was charged and no card details were \
+kept. Be straightforward about that if asked.
+- Never restate a price, a confirmation code or a booking reference from \
+memory; use the values in the session state line.
+- Write plain sentences. No markdown, no asterisks for bold, no bullet \
+lists, no tables -- the chat shows your reply as literal text.
 """
 
 # Every phase must have a prompt: agent/graph.py builds one agent per phase
@@ -193,6 +235,21 @@ def phase_context_line(session: dict) -> str:
         parts.append(f"Booking {booking.get('id')} submitted")
     elif session.get("phase") == "FORM_FILLING":
         parts.append("Booking form open, not yet submitted")
+
+    # The payment half, same rule: facts the model cannot otherwise know,
+    # never instructions. The confirmation code is the value the user will
+    # ask about ("what was my reference?"), and it is minted by the payment
+    # server *after* the model's last turn -- so without this line the
+    # model has no grounded way to repeat it and would either refuse or
+    # invent one. Both are bad; the second is a Principle I breach on the
+    # very last screen of the demo.
+    confirmation = session.get("payment_confirmation") or {}
+    if confirmation.get("confirmation_code"):
+        parts.append(
+            f"Mock payment confirmed, code {confirmation['confirmation_code']}"
+        )
+    elif session.get("phase") == "AWAITING_PAYMENT":
+        parts.append("Mock checkout open, payment not yet confirmed")
 
     slate = session.get("candidate_listings") or []
     if slate:

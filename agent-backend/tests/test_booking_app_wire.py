@@ -114,7 +114,7 @@ def stub_resource(monkeypatch):
     async def _read(uri="ui://booking/form.html", url=None):
         return dict(RESOURCE)
 
-    monkeypatch.setattr("api.main.read_form_resource", _read)
+    monkeypatch.setattr("api.main.read_app_resource", _read)
 
 
 def form_filling_session() -> SessionState:
@@ -129,7 +129,7 @@ def form_filling_session() -> SessionState:
 
 async def test_the_envelope_carries_the_resource_with_its_csp(stub_resource):
     """spec.md US3 AS1. The CSP lives in the resource's `_meta`, and the
-    LangChain adapter drops it -- `read_form_resource` exists to keep it,
+    LangChain adapter drops it -- `read_app_resource` exists to keep it,
     and this asserts it survives all the way into the message the host
     receives, which is the only place it can do any good.
     """
@@ -420,7 +420,7 @@ async def test_a_failure_to_open_the_form_is_reported_not_swallowed(monkeypatch)
     async def _explode(uri="ui://booking/form.html", url=None):
         raise RuntimeError("booking server unreachable")
 
-    monkeypatch.setattr("api.main.read_form_resource", _explode)
+    monkeypatch.setattr("api.main.read_app_resource", _explode)
 
     socket = FakeSocket()
     await _BookingFormStream(socket).maybe_open(

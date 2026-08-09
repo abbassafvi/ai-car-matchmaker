@@ -138,6 +138,17 @@ OPEN_BOOKING_FORM_TOOL = "open_booking_form"
 # the booking server and the asymmetry between them.
 SUBMIT_BOOKING_TOOL = "submit_booking"
 
+OPEN_MOCK_CHECKOUT_TOOL = "open_mock_checkout"
+
+# The payment server's other half, named and deliberately never wrapped
+# and never bound. `confirm_mock_payment` is not a model tool in any
+# phase, for a sharper reason than `submit_booking`: its arguments would
+# be card-like, and a model tool's arguments are written into the message
+# history, checkpointed, and traced -- the three places spec.md US4 AS2
+# forbids. Only the MCP App bridge in `api/main.py` calls it, and it
+# forwards nothing the browser sent.
+CONFIRM_MOCK_PAYMENT_TOOL = "confirm_mock_payment"
+
 
 def build_booking_tools(booking_mcp_tools: list) -> list:
     """Model-facing booking tools, closed over the discovered MCP tools.
@@ -207,6 +218,83 @@ def build_booking_tools(booking_mcp_tools: list) -> list:
         })
 
     return [open_booking_form]
+
+
+def build_checkout_tools(payment_mcp_tools: list) -> list:
+    """Model-facing checkout tools, closed over the discovered MCP tools.
+
+    The booking pattern, second instance. Returns `[]` when the payment
+    server was unreachable at startup, which leaves AWAITING_PAYMENT with
+    no `open_mock_checkout` to bind -- fail-soft, like every other
+    downstream here.
+
+    The raw `open_mock_checkout` takes `{booking, listing}` **required**:
+    the model would retype the record *and the price it is about to
+    charge*. That is Principle I inverted in the one surface where a
+    wrong number is least forgivable, so the wrapper takes **no
+    model-supplied arguments at all** and reads both records from
+    persisted state.
+
+    `confirm_mock_payment` is deliberately not wrapped and not returned.
+    """
+    open_checkout_mcp = next(
+        (t for t in payment_mcp_tools if t.name == OPEN_MOCK_CHECKOUT_TOOL), None
+    )
+    if open_checkout_mcp is None:
+        return []
+
+    @tool
+    async def open_mock_checkout(
+        state: Annotated[dict, InjectedState] = None,
+        tool_call_id: Annotated[str, InjectedToolCallId] = None,
+    ) -> Command:
+        """Show the mock checkout for the booking the user has submitted.
+
+        Takes no arguments -- it always opens checkout for this session's
+        booking and fills in the car and amount itself. Call it when the
+        user is ready to pay, or asks to see the checkout again.
+        """
+        from agent.mcp_client import call_structured
+
+        session = SessionState.model_validate(state["session"])
+        listing = session.selected_listing()
+        booking = session.booking
+
+        if booking is None or booking.status != "SUBMITTED" or listing is None:
+            # An ordinary ToolMessage, not an exception: per §8.7a the
+            # model would never see the exception, and it can recover by
+            # telling the user to finish the booking form first.
+            return Command(update={"messages": [ToolMessage(
+                "There is no submitted booking yet, so there is nothing to pay "
+                "for. Tell the user to complete and submit the booking form "
+                "first -- do not ask them for payment details.",
+                tool_call_id=tool_call_id,
+            )]})
+
+        # Both verbatim records go to the server, not through the model.
+        # The server echoes back only its display projections, which drop
+        # the attacker-controlled `description` and the user's contact
+        # details before either can reach the iframe.
+        payload = await call_structured(
+            open_checkout_mcp,
+            {"booking": booking.model_dump(mode="json"), "listing": listing},
+        )
+
+        session.checkout_requests += 1
+        return Command(update={
+            "session": session.model_dump(mode="json"),
+            "messages": [ToolMessage(
+                f"The mock checkout for booking {booking.id} is now open in the "
+                f"chat. Tell the user to complete it there. It is clearly "
+                f"labelled as a mock and takes no real payment. Do NOT ask them "
+                f"for card details in the chat -- the checkout collects those "
+                f"and discards them.",
+                tool_call_id=tool_call_id,
+                artifact={"open_mock_checkout": payload},
+            )],
+        })
+
+    return [open_mock_checkout]
 
 
 def build_research_tools(marketplace_tools: list) -> list:
@@ -306,17 +394,24 @@ def build_research_tools(marketplace_tools: list) -> list:
     return [refine_search]
 
 
-def build_runtime_tools(marketplace_tools: list, booking_tools: list) -> list:
+def build_runtime_tools(
+    marketplace_tools: list, booking_tools: list, payment_tools: list | None = None
+) -> list:
     """Every tool that had to wait for MCP discovery, ready for
     `PhaseAgentRegistry(extra_tools=...)`.
 
     The marketplace tools are passed through as-is (they are model-facing
-    by design and the gate names them for RESEARCHING). The booking tools
-    are **not** -- only the wrapper built from them is. See
-    `build_booking_tools`.
+    by design and the gate names them for RESEARCHING). The booking and
+    payment tools are **not** -- only the wrappers built from them are.
+    See `build_booking_tools` / `build_checkout_tools`.
+
+    `payment_tools` defaults to `None` rather than being required so the
+    M4a-era two-argument call sites keep working; every production caller
+    passes all three.
     """
     return [
         *marketplace_tools,
         *build_research_tools(marketplace_tools),
         *build_booking_tools(booking_tools),
+        *build_checkout_tools(payment_tools or []),
     ]

@@ -123,3 +123,60 @@ async def test_discovery_returns_empty_instead_of_raising_when_unreachable():
     the real failure path rather than a mocked one.
     """
     assert await discover_marketplace_tools("http://127.0.0.1:9/mcp") == []
+
+
+@pytest.mark.asyncio
+async def test_every_server_discovery_is_fail_soft():
+    """All three, not just the marketplace. Port 9 is the discard
+    protocol, so this exercises the real failure path rather than a mock.
+
+    An unreachable payment server must degrade checkout and leave the
+    backend booting -- the same contract booking got in M4a. The symptom
+    is /health's payment_connected:false, not a container that will not
+    start.
+    """
+    from agent.mcp_client import discover_booking_tools, discover_payment_tools
+
+    assert await discover_booking_tools("http://127.0.0.1:9/booking/mcp") == []
+    assert await discover_payment_tools("http://127.0.0.1:9/payment/mcp") == []
+
+
+def test_each_app_resource_is_routed_to_its_own_server():
+    """The trap generalising `read_form_resource` created.
+
+    It used to default both the URI (`ui://booking/form.html`) and the
+    endpoint (`MCP_BOOKING_URL`). Those two defaults have to agree, and
+    nothing made them: calling it for the checkout resource would have
+    asked the *booking* server for a document it does not serve, and the
+    failure would have surfaced as "the checkout App never opens".
+
+    So the endpoint is looked up from the URI, and this pins that the two
+    Apps resolve to two different environment variables.
+    """
+    from agent.mcp_client import (
+        APP_RESOURCE_ENDPOINTS,
+        CHECKOUT_RESOURCE_URI,
+        FORM_RESOURCE_URI,
+    )
+
+    booking_var, _ = APP_RESOURCE_ENDPOINTS[FORM_RESOURCE_URI]
+    payment_var, _ = APP_RESOURCE_ENDPOINTS[CHECKOUT_RESOURCE_URI]
+    assert booking_var == "MCP_BOOKING_URL"
+    assert payment_var == "MCP_PAYMENT_URL"
+    assert booking_var != payment_var
+
+    for uri, (_var, fallback) in APP_RESOURCE_ENDPOINTS.items():
+        assert uri.startswith("ui://")
+        assert fallback.startswith("http")
+
+
+@pytest.mark.asyncio
+async def test_an_unregistered_resource_uri_refuses_rather_than_guessing():
+    """Guessing an endpoint is how one App ends up asking another App's
+    server for a document. Raising names the fix; a wrong default would
+    surface three layers away as an empty iframe.
+    """
+    from agent.mcp_client import read_app_resource
+
+    with pytest.raises(ValueError, match="APP_RESOURCE_ENDPOINTS"):
+        await read_app_resource("ui://listing-detail/detail.html")

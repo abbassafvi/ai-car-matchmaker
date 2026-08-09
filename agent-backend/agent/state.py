@@ -53,6 +53,22 @@ class Phase(str, Enum):
 #    "actually, the Kia", while `_handle_action` let anyone who *clicked*
 #    another card straight through -- the click path and the prose path
 #    diverging again after Phase E made them converge.
+# 4. **`confirm_mock_payment` is deliberately absent from
+#    AWAITING_PAYMENT** (M4b). It was named here from M0 until M4b, back
+#    when nothing resolved either payment tool, so the gate table carried
+#    two names that bound to nothing -- exactly the hole point 1 above
+#    describes, sitting unnoticed one row below it through five audits.
+#
+#    Removing it is the same decision the user took for `submit_booking`,
+#    and the reason is sharper. A model-callable `submit_booking` could
+#    fabricate the user's *contact details*; a model-callable
+#    `confirm_mock_payment` would take **card-like values as tool
+#    arguments**, which are written into the message history, checkpointed
+#    to SQLite, and handed to `auto_instrument` -- i.e. all three of the
+#    places spec.md US4 AS2 forbids ("datastore, log file, or OTel span"),
+#    from one binding. It is reachable only through the MCP App bridge,
+#    where the values are the ones the user actually typed and the bridge
+#    forwards none of them.
 TOOLS_BY_PHASE: dict["Phase", list[str]] = {
     Phase.INTERVIEWING: ["save_interview_state"],
     Phase.RESEARCHING: ["search_listings", "get_listing_details"],
@@ -60,7 +76,7 @@ TOOLS_BY_PHASE: dict["Phase", list[str]] = {
         "get_listing_details", "select_listing", "refine_search", "save_interview_state",
     ],
     Phase.FORM_FILLING: ["open_booking_form", "select_listing", "refine_search"],
-    Phase.AWAITING_PAYMENT: ["open_mock_checkout", "confirm_mock_payment"],
+    Phase.AWAITING_PAYMENT: ["open_mock_checkout"],
     Phase.CONFIRMED: [],
 }
 
@@ -160,6 +176,14 @@ class SessionState(BaseModel):
     # message the browser may have missed. A boolean would not survive the
     # user asking to see the form a second time.
     booking_form_requests: int = 0
+
+    # The same handshake, for the checkout App (M4b). Kept as a second
+    # counter rather than a shared one: the two Apps open independently
+    # (a resumed AWAITING_PAYMENT session needs checkout back without
+    # reopening the booking form), and one counter would make "which App
+    # does this connection still owe?" ambiguous the moment both have
+    # been asked for in a single session.
+    checkout_requests: int = 0
 
     def save_interview_slots(self, **updates) -> "SessionState":
         """Overwrite (never append/merge-append) — Constitution Principle II
@@ -318,14 +342,28 @@ class SessionState(BaseModel):
           untrusted input like any other, so its idea of which listing this
           is has to agree with the session's.
         """
+        # ⚠️ Duplicate first, phase second, and the order is load-bearing.
+        #
+        # It was the other way round until M4b. A real replay arrives with
+        # the phase *already* advanced to AWAITING_PAYMENT, so the phase
+        # guard fired first and this one could never run on the path it
+        # was written for -- the error said "can only be submitted from
+        # FORM_FILLING" when the true answer was "you already did".
+        # M4a's own test hid this by setting `phase = FORM_FILLING` by
+        # hand first, with the comment "as if the client replayed the
+        # call", which is a state the machine cannot produce (§3's
+        # twelfth lesson: a fake that is easier than the real thing tests
+        # the fake). Both refuse, so nothing was ever double-booked --
+        # but the log line named the wrong cause, and a guard that cannot
+        # fire is not a guard.
+        if self.booking is not None and self.booking.status == "SUBMITTED":
+            raise ValueError(
+                f"Booking {self.booking.id} has already been submitted for this session."
+            )
         if self.phase != Phase.FORM_FILLING:
             raise ValueError(
                 f"A booking can only be submitted from FORM_FILLING "
                 f"(this session is in {self.phase.value})."
-            )
-        if self.booking is not None and self.booking.status == "SUBMITTED":
-            raise ValueError(
-                f"Booking {self.booking.id} has already been submitted for this session."
             )
         if booking.listing_id != self.selected_listing_id:
             raise ValueError(
@@ -336,6 +374,68 @@ class SessionState(BaseModel):
         self.booking = booking
         self.phase = Phase.AWAITING_PAYMENT
         self._traced(previous, "submit_booking")
+        return self
+
+    def confirm_payment(self, confirmation: "PaymentConfirmation") -> "SessionState":
+        """Record a mock payment confirmation and advance to CONFIRMED.
+
+        The **sixth** transition (spec.md US4 AS2's phase change), and the
+        second that is not reachable from a model tool:
+        `confirm_mock_payment` is absent from `TOOLS_BY_PHASE` because a
+        model-callable version would carry card-like values as tool
+        arguments into the message history, the checkpointer and an OTel
+        span at once. It arrives through the MCP App bridge instead --
+        and lands here, so the transition still lives in this module with
+        the other five.
+
+        Four refusals, all raising rather than passing silently, for the
+        same reason `submit_booking` has three: a payment that appears to
+        succeed and does not is the worst outcome.
+
+        - wrong phase: nothing may reach CONFIRMED without a booking;
+        - no submitted booking: AWAITING_PAYMENT is only reachable
+          through `submit_booking`, so this is a corrupted-state guard
+          rather than a user-reachable one -- but the App bridge is a
+          network path and the cost of checking is nothing;
+        - already confirmed: a retry, a double-click or a reconnect must
+          not mint a second confirmation for one booking (the duplicate
+          guard `submit_booking` needed for exactly the same reason);
+        - a confirmation for a different booking: the iframe is untrusted
+          input like any other, so its idea of what is being paid for has
+          to agree with the session's.
+
+        Note what is *not* checked: anything about a payment instrument.
+        There is no such field on `PaymentConfirmation`, by construction
+        (Principle III), so there is nothing here to validate or store.
+        """
+        # Duplicate first -- same ordering argument as `submit_booking`
+        # above. A replayed confirmation arrives with the phase already at
+        # CONFIRMED, so a phase-first check would answer "can only be
+        # confirmed from AWAITING_PAYMENT" to something whose real cause
+        # is "you already paid".
+        if self.payment_confirmation is not None:
+            raise ValueError(
+                f"Payment {self.payment_confirmation.id} has already been "
+                f"confirmed for this session."
+            )
+        if self.phase != Phase.AWAITING_PAYMENT:
+            raise ValueError(
+                f"A payment can only be confirmed from AWAITING_PAYMENT "
+                f"(this session is in {self.phase.value})."
+            )
+        if self.booking is None or self.booking.status != "SUBMITTED":
+            raise ValueError(
+                "There is no submitted booking to pay for in this session."
+            )
+        if confirmation.booking_id != self.booking.id:
+            raise ValueError(
+                f"Confirmation is for booking {confirmation.booking_id!r} but "
+                f"this session's booking is {self.booking.id!r}."
+            )
+        previous = self.phase
+        self.payment_confirmation = confirmation
+        self.phase = Phase.CONFIRMED
+        self._traced(previous, "confirm_payment")
         return self
 
     def selected_listing(self) -> Optional[dict]:

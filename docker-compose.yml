@@ -16,15 +16,16 @@ services:
     environment:
       - PHOENIX_COLLECTOR_ENDPOINT=http://phoenix:4317
       - MCP_MARKETPLACE_URL=http://mcp-services:8100/mcp
-      # Both MCP servers share one process and one port; only the path
-      # differs. Set explicitly rather than derived from the line above,
-      # because the defaults in agent/mcp_client.py are localhost -- which
-      # is correct for native dev and silently wrong in a container, where
-      # it would resolve to the backend itself and fail discovery. That
-      # failure is fail-soft, so the symptom would be a booking step that
-      # simply never works, with /health's booking_connected:false the only
-      # clue.
+      # All three MCP servers share one process and one port; only the
+      # path differs. Set explicitly rather than derived from the line
+      # above, because the defaults in agent/mcp_client.py are localhost
+      # -- which is correct for native dev and silently wrong in a
+      # container, where it would resolve to the backend itself and fail
+      # discovery. That failure is fail-soft, so the symptom would be a
+      # booking or checkout step that simply never works, with /health's
+      # booking_connected / payment_connected the only clue.
       - MCP_BOOKING_URL=http://mcp-services:8100/booking/mcp
+      - MCP_PAYMENT_URL=http://mcp-services:8100/payment/mcp
     volumes:
       - agent-backend-data:/app/data
     depends_on:

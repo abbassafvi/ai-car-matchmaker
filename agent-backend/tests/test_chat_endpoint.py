@@ -93,3 +93,92 @@ def test_backend_boots_and_reports_degraded_without_an_llm_key(tmp_path, monkeyp
             err = ws.receive_json()
             assert err["type"] == "error"
             assert "LLM_API_KEY" in err["message"]
+
+
+def test_health_reports_each_mcp_server_separately(tmp_path, monkeypatch):
+    """Three independent signals, not one composite.
+
+    `mcp_connected` has meant "the marketplace is reachable" to every
+    M0-M3 reader, so booking (M4a) and payment (M4b) each got their own
+    field rather than being folded in -- otherwise a checkout outage
+    would present as "booking is broken", and one green flag would be
+    covering three different failures.
+
+    Written in M4b after mutation testing found that **neither**
+    `booking_connected` nor `payment_connected` had any regression test:
+    deleting `payment_connected` from the `status` calculation left the
+    whole suite green. M4a's §14 finding 10 was verified live, both up
+    and both down, and that verification was never turned into a test --
+    §3's recurring shape, one level down.
+
+    Nothing listens on port 9 (the discard protocol), so all three
+    discoveries genuinely fail here rather than being mocked.
+    """
+    monkeypatch.setenv("LLM_API_KEY", "test-dummy-not-a-real-key")
+    monkeypatch.setenv("SESSIONS_DB_PATH", str(tmp_path / "sessions.sqlite"))
+    monkeypatch.setenv("MCP_MARKETPLACE_URL", "http://127.0.0.1:9/mcp")
+    monkeypatch.setenv("MCP_BOOKING_URL", "http://127.0.0.1:9/booking/mcp")
+    monkeypatch.setenv("MCP_PAYMENT_URL", "http://127.0.0.1:9/payment/mcp")
+    from api.main import app
+
+    with TestClient(app) as client:
+        body = client.get("/health").json()
+
+    # Each is reported, and each is its own field.
+    for field in ("mcp_connected", "booking_connected", "payment_connected"):
+        assert body[field] is False, f"{field} missing or wrongly true"
+    assert body["booking_tools"] == []
+    assert body["payment_tools"] == []
+    assert body["status"] == "degraded"
+
+
+def test_health_status_degrades_on_any_single_outage():
+    """The truth table, tested directly.
+
+    Mutation testing in M4b showed why this cannot be tested through the
+    endpoint: every unit test that calls /health has all downstreams
+    unreachable, so `status` is "degraded" regardless of the expression,
+    and deleting `payment_connected` from it changed nothing. The
+    one-server-down case is the one that matters, and it is a property of
+    a pure function -- so assert it there rather than standing up two
+    real MCP servers to check a boolean.
+    """
+    from api.main import HEALTH_SIGNALS, health_status
+
+    # Spelled out, NOT derived from HEALTH_SIGNALS.
+    #
+    # The first version of this test built its cases by iterating the
+    # constant, which made it circular: deleting `booking_connected` from
+    # HEALTH_SIGNALS deleted the assertion about it too, and the mutation
+    # stayed green. A test that reads its expectations from the thing
+    # under test cannot detect that thing shrinking (§3 lesson 2).
+    expected = {
+        "llm_configured", "mcp_connected", "booking_connected", "payment_connected",
+    }
+    assert set(HEALTH_SIGNALS) == expected, (
+        f"a downstream was added to or removed from the health composite: "
+        f"{set(HEALTH_SIGNALS) ^ expected}. If that is intended, update this "
+        f"literal deliberately -- it is the thing stopping a server from "
+        f"quietly dropping out of /health."
+    )
+
+    all_up = {name: True for name in expected}
+    assert health_status(**all_up) == "ok"
+
+    # Each signal on its own must be able to degrade the composite.
+    for name in sorted(expected):
+        assert health_status(**{**all_up, name: False}) == "degraded", (
+            f"{name} going down does not degrade /health -- a real outage "
+            f"would report ok"
+        )
+
+
+def test_health_status_refuses_to_report_on_a_signal_it_was_not_given():
+    """A silently-defaulted signal would report "ok" for a downstream
+    nobody checked, which is worse than a crash: it is a green light with
+    no evidence behind it.
+    """
+    from api.main import health_status
+
+    with pytest.raises(ValueError, match="payment_connected"):
+        health_status(llm_configured=True, mcp_connected=True, booking_connected=True)

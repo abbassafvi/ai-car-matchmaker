@@ -142,11 +142,21 @@ def test_a_second_submit_is_refused():
     """
     session = booked_session()
     session.submit_booking(draft(session))
-    session.phase = Phase.FORM_FILLING  # as if the client replayed the call
+
+    # No hand-set phase any more. This line used to read
+    #     session.phase = Phase.FORM_FILLING  # as if the client replayed
+    # which was a state the machine cannot produce: a real replay arrives
+    # with the phase already advanced, and the *phase* guard answered it
+    # first, so the duplicate guard below never ran in production. M4b
+    # reordered the guards in SessionState.submit_booking so the replay
+    # path reaches the check that describes it. Found by writing the same
+    # test for confirm_payment and watching it fail on the wrong message.
+    assert session.phase == Phase.AWAITING_PAYMENT
 
     with pytest.raises(ValueError, match="already been submitted"):
         session.submit_booking(draft(session))
     assert session.booking.id == "BKG-NEW"
+    assert session.phase == Phase.AWAITING_PAYMENT
 
 
 def test_a_booking_for_a_different_car_than_the_selected_one_is_refused():

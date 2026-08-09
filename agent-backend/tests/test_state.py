@@ -46,10 +46,25 @@ def test_available_tools_gated_by_phase():
 
     s.phase = Phase.FORM_FILLING
     assert "open_booking_form" in s.available_tools()
-    assert "confirm_mock_payment" not in s.available_tools()
+    assert "open_mock_checkout" not in s.available_tools()
 
     s.phase = Phase.AWAITING_PAYMENT
-    assert "confirm_mock_payment" in s.available_tools()
+    assert "open_mock_checkout" in s.available_tools()
+    assert "open_booking_form" not in s.available_tools()
+
+    # ⚠️ INVERTED IN M4b. This asserted `"confirm_mock_payment" in
+    # s.available_tools()` from M0 until M4b -- a committed, green test
+    # encoding exactly the hole `TOOLS_BY_PHASE`'s own comment warns
+    # about a few lines above the table. Nothing resolved the name, so it
+    # bound to nothing and no test noticed across five audits.
+    #
+    # It must never be model-callable. Its arguments would be card-like,
+    # and a model tool's arguments are written into the message history,
+    # checkpointed to SQLite and handed to auto_instrument -- all three
+    # of spec.md US4 AS2's prohibitions ("datastore, log file, or OTel
+    # span") from a single binding. It is reachable only through the MCP
+    # App bridge, which forwards nothing the browser sent.
+    assert "confirm_mock_payment" not in s.available_tools()
 
     s.phase = Phase.CONFIRMED
     assert s.available_tools() == []

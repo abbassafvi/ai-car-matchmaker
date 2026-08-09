@@ -4,7 +4,8 @@
     "src/styles.css": "2fdbb57a9d38e9c038e427cb09e313ffb2aca99e4ac5369fdcfd8a2144be0459",
     "index.html": "db6dc06939ca0bcca48d6a32a4fa419e1650748ea21c564de626bf7583108902",
     "vite.config.ts": "28c257c94c903ed2e37241462ee80c9a12ac3673e4c2b4dd723b72d4bf84dc42",
-    "package.json": "ddcc32d4e1b353c0d7c8e53f7a74833860d90505fd5ea49167332c95792ddca2"
+    "package.json": "c906fb0e6217379905079bb8b0dc07e84d3044c41d1dd3aa557c0d9ced317292",
+    "../scripts/install-bundle.mjs": "1db2574ff583f595b31ef3143be1b06fe42638f4ccf17f3aab1cb36b1bf6bbca"
   },
   "bundle_sha256": "bfb4c642c87fddddc7e99eabba57edad1d42ad0e94b820afafecf3cc17d85319",
   "bytes": 264457

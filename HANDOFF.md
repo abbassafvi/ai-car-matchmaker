@@ -165,7 +165,7 @@ a trailing `docs:` commit that stamps this section cannot list its own sha,
 so this block may lag HEAD by one or two docs-only commits — check
 `git log --oneline -5` rather than trusting it:
 ```
-(this commit)  M4a Phase C1: the audit worklist, booking tools, transitions
+9b8f670  M4a Phase C1: the audit worklist, plus a 421 nobody could see
 7bca1df  docs: record the M4a A/B audit, and correct four stale doc claims
 69f9ac5  M4a Phase B (T032): the booking form, built as a real MCP App
 1189f91  M4a Phase A (T033 server half): booking MCP App server

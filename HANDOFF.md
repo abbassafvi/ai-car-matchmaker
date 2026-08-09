@@ -124,15 +124,23 @@ M6   ⬜ Hardening, E2E tests, README finalization
        ⏸️ deck (#13) + demo video (#14) — LAST, and the user's to own
 ```
 
-**Test suite: 284 total** (measured 2026-08-09 after M4a Phase C1, not copied
+**Test suite: 286 total** (measured 2026-08-09 after M4a Phase C1, not copied
 forward — `pytest tests/ -q` in each service).
+
+⚠️ **The Phase C1 commit message says "278 pass with no external setup". It
+is wrong by one — the real figure is 277.** That count was taken while
+Phoenix was still up from a `docker compose` run, so `test_otel_setup`
+passed instead of skipping. Recorded rather than quietly dropped, because
+it is this repo's own failure mode in miniature: a number measured in an
+environment richer than the one it claims to describe. **Measure test
+counts with nothing else running.**
 
 | Suite | Tests | Gated | Files |
 |---|---|---|---|
-| `mcp-services` | **91** | 0 | `test_generate_listings` (8), `test_marketplace` (22), `test_marketplace_server` (9), `test_booking` (**26**), `test_booking_server` (**26**) |
+| `mcp-services` | **93** | 0 | `test_generate_listings` (8), `test_marketplace` (22), `test_marketplace_server` (9), `test_booking` (**26**), `test_booking_server` (**28**) |
 | `agent-backend` | **193** | 9 | 23 modules, see §7 |
 
-- **275 pass with no external setup** (91 + 184)
+- **277 pass with no external setup** (93 + 184)
 - ⚠️ **The live sweep has NOT been re-run since 2026-08-08.** On that date
   all 202 then-existing tests passed together with a live key and Phoenix
   running (`agent-backend` **163 passed, 0 skipped**, `mcp-services` 39),
@@ -603,7 +611,7 @@ docker compose up --build
 
 # Tests (run the FULL suite together, never file-by-file — see §8.31)
 source .venv/bin/activate
-(cd mcp-services  && python -m pytest tests/ -q)   # 91 pass, no setup needed
+(cd mcp-services  && python -m pytest tests/ -q)   # 93 pass, no setup needed
 (cd agent-backend && python -m pytest tests/ -q)   # 184 pass, 9 skip (no key)
 # Bare `pytest tests/` also works now. It did NOT before the Phase C
 # audit -- both suites died at collection, and only `python -m pytest`
@@ -708,7 +716,7 @@ python mcp-services/data/generate_listings.py
 | `booking/static/form.html` | **M4a Phase B**: the committed single-file bundle. Build artifact — regenerate from `mcp-apps-ui/booking-form/`. **Staleness IS detected since Phase C1** via the manifest below |
 | `booking/static/form.build.json` | **Phase C1**: SHA-256 of each bundle source + of the bundle. `test_booking_server.py` recomputes it and fails on drift (§14 finding 7). Committed alongside the bundle |
 | `tests/test_booking.py` | **26 tests** — validation rules, allowlist, Principle III, and (Phase C1) the pickup-date rules |
-| `tests/test_booking_server.py` | **26 tests** — MCP App wire metadata, the two-server mount, the committed bundle's guards, and (Phase C1) the source-manifest staleness guard |
+| `tests/test_booking_server.py` | **28 tests** — MCP App wire metadata, the two-server mount, the committed bundle's guards, and (Phase C1) the source-manifest staleness guard plus the transport-security regression (§14 finding 13) |
 | `payment/` | Empty dir (M4b) |
 | `app_stub.py` | **DELETED** in Phase B |
 
@@ -1585,9 +1593,9 @@ unequal privileges, and only one updates state.**
 > *shapes* of defect this repo produces. C2 needs **no LLM spend** except
 > the live prompt pass noted below.
 >
-> Measured 2026-08-09, not copied forward: **284 tests** — mcp-services
-> **91**, agent-backend **184 passed + 9 skipped** with no key. 275 need no
-> external setup. ⚠️ The *live* sweep has not been re-run since 2026-08-08
+> Measured 2026-08-09 with nothing else running, not copied forward:
+> **286 tests** — mcp-services **93**, agent-backend **184 passed + 9
+> skipped**. 277 need no external setup. ⚠️ The *live* sweep has not been re-run since 2026-08-08
 > (163/0 then); everything added since is ungated, so it should now be
 > 193/0 — an inference, not a measurement.
 >

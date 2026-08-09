@@ -28,11 +28,11 @@ agent can now **open the form for the car the user picked** (Phase C1 —
 tools, phase transitions, discovery). Rendering that form in the browser is
 the rest of M4a.
 
-**284 automated tests**, of which **275 run with no external setup at all**
-(91 `mcp-services` + 184 `agent-backend`); the remaining 9 need a live LLM key
+**286 automated tests**, of which **277 run with no external setup at all**
+(93 `mcp-services` + 184 `agent-backend`); the remaining 9 need a live LLM key
 and/or a running Phoenix and auto-skip without them. The 202 tests that
 existed on 2026-08-08 have been run green together against a live model and a
-running Phoenix; the 82 added since need no external setup and none is gated.
+running Phoenix; the 84 added since need no external setup and none is gated.
 Plus live end-to-end verification against a real Docker Compose build. See
 [`specs/001-ai-car-matchmaker/`](specs/001-ai-car-matchmaker/) for the full
 spec-driven-development trail:

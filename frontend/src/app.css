@@ -184,3 +184,34 @@
     flex: none;
   }
 }
+
+/* --- MCP App host (M4a Phase D) -----------------------------------------
+   The booking form is an iframe in the chat column, not a panel: hackathon
+   requirement #3 is that the transaction happens inside the conversation.
+   It is capped and scrollable rather than allowed to grow, so a long form
+   cannot push the composer off screen and strand the user with no way to
+   type. The App resizes itself (ext-apps `autoResize`), and the height is
+   driven by content up to that cap. */
+.mcp-app {
+  border-top: 1px solid var(--line, #e5e7eb);
+  background: var(--panel, #f8fafc);
+  padding: 0.75rem;
+  max-height: 60vh;
+  overflow-y: auto;
+  flex: 0 0 auto;
+}
+
+.mcp-app iframe {
+  display: block;
+  width: 100%;
+  /* A sandboxed iframe has no transparent background of its own in every
+     browser, so it is given one explicitly rather than showing through as
+     white-on-white against the panel. */
+  background: #ffffff;
+  border: 1px solid var(--line, #e5e7eb);
+  border-radius: 10px;
+  /* A floor only. The real height is set by the host from the App's own
+     size-changed notifications; this is what it looks like in the moment
+     before the first one arrives. */
+  min-height: 12rem;
+}

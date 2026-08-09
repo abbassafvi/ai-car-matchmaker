@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { MessageProcessor } from "@a2ui/web_core/v0_9";
 import { A2uiSurface, basicCatalog } from "@a2ui/react/v0_9";
+import McpAppFrame from "./mcp-app-host/McpAppFrame";
+import type { McpAppEnvelope } from "./mcp-app-host/types";
 import "./app.css";
 import "./a2ui-theme.css";
 // Note: @a2ui/react@0.10.2's "./styles/structural.css" export points at a
@@ -29,8 +31,17 @@ export default function App() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
   const [connected, setConnected] = useState(false);
+  // The booking MCP App, when the backend has one open for us. One at a
+  // time by design: an App is bound to a phase, and the phase is singular.
+  const [mcpApp, setMcpApp] = useState<McpAppEnvelope | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
   const logRef = useRef<HTMLDivElement | null>(null);
+  // Tool calls the App has made and the backend has not answered yet.
+  // Keyed by call_id because replies arrive on the shared socket, out of
+  // band and potentially out of order.
+  const pendingCalls = useRef(
+    new Map<string, (result: Record<string, unknown>) => void>(),
+  );
   // MessageProcessor's 2nd constructor argument is a global ActionListener:
   // it receives every action dispatched by any component on any surface
   // (e.g. a catalogue card's "Choose this one" Button). Relayed to the
@@ -92,6 +103,14 @@ export default function App() {
         processor.processMessages(data.messages);
       } else if (data.type === "error") {
         setMessages((prev) => [...prev, { role: "assistant", content: `⚠️ ${data.message}` }]);
+      } else if (data.type === "mcp_app") {
+        setMcpApp(data as McpAppEnvelope);
+      } else if (data.type === "app_tool_result") {
+        const resolve = pendingCalls.current.get(data.call_id);
+        if (resolve) {
+          pendingCalls.current.delete(data.call_id);
+          resolve(data.result?.structuredContent ?? {});
+        }
       }
     };
 
@@ -102,6 +121,24 @@ export default function App() {
   useEffect(() => {
     if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight;
   }, [messages]);
+
+  // Handed to the MCP App host, which gives it to `AppBridge.oncalltool`.
+  // The App awaits this, so every path has to settle: a rejected promise
+  // surfaces in the form as an error the user can act on, whereas a promise
+  // that never resolves leaves it stuck on "Submitting…" forever.
+  const callServerTool = (name: string, args: Record<string, unknown>) =>
+    new Promise<Record<string, unknown>>((resolve, reject) => {
+      const ws = wsRef.current;
+      if (!ws || ws.readyState !== WebSocket.OPEN) {
+        reject(new Error("not connected"));
+        return;
+      }
+      const callId = crypto.randomUUID();
+      pendingCalls.current.set(callId, resolve);
+      ws.send(JSON.stringify({
+        type: "app_tool_call", call_id: callId, name, arguments: args,
+      }));
+    });
 
   const send = () => {
     if (!input.trim() || !wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
@@ -137,6 +174,15 @@ export default function App() {
             </div>
           ))}
         </div>
+
+        {/* In the chat column, not the surfaces panel (decided 2026-08-08):
+            requirement #3 is that booking happens *inside the conversation*,
+            and a form in a side panel reads as leaving it. It sits below the
+            log and above the composer so the user can still talk while the
+            form is open. */}
+        {mcpApp && (
+          <McpAppFrame envelope={mcpApp} onCallTool={callServerTool} />
+        )}
 
         <div className="composer">
           <input

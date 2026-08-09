@@ -117,9 +117,12 @@ M4a  🟡 IN PROGRESS — Booking form MCP App (User Story 3)
                    toolResult), the app_tool_call reverse channel, the
                    code-driven kickoff, the CSP-preserving resource read,
                    and the phase line. 17/17 live over a real WebSocket
-       ⬜ Phase D  T034 frontend iframe host (AppBridge), then click it
-                   — START HERE (§10)
-       ⬜ Phase E  full-stack verify, docs, push
+       ✅ Phase D  T034 frontend/src/mcp-app-host/: AppBridge over a
+                   srcdoc iframe in the chat column, host-applied CSP,
+                   tools/call tunnelled over the chat WebSocket. The form
+                   renders pre-filled, rejects, keeps what was typed, and
+                   books — driven in a real browser
+       ⬜ Phase E  full-stack verify, docs, push — START HERE (§10)
 M4b  ⬜ Mock checkout MCP App (User Story 4)
 M4c  ⬜ Session resume (User Story 5)
 M5   ⬜ Evals (observability itself is wired, M2.5/T051)
@@ -127,7 +130,7 @@ M6   ⬜ Hardening, E2E tests, README finalization
        ⏸️ deck (#13) + demo video (#14) — LAST, and the user's to own
 ```
 
-**Test suite: 311 total** (measured 2026-08-09 after M4a Phase C1, not copied
+**Test suite: 322 total** (measured 2026-08-09 after M4a Phase C1, not copied
 forward — `pytest tests/ -q` in each service).
 
 ⚠️ **The Phase C1 commit message says "278 pass with no external setup". It
@@ -142,8 +145,9 @@ counts with nothing else running.**
 |---|---|---|---|
 | `mcp-services` | **94** | 0 | `test_generate_listings` (8), `test_marketplace` (22), `test_marketplace_server` (9), `test_booking` (**26**), `test_booking_server` (**28**) |
 | `agent-backend` | **217** | 9 | 24 modules, see §7 |
+| `frontend` | **11** | 0 | `src/mcp-app-host/csp.test.ts` — vitest, `npm test` |
 
-- **303 pass with no external setup** (94 + 209)
+- **313 pass with no external setup** (94 + 208 + 11)
 - ⚠️ **The live sweep has NOT been re-run since 2026-08-08.** On that date
   all 202 then-existing tests passed together with a live key and Phoenix
   running (`agent-backend` **163 passed, 0 skipped**, `mcp-services` 39),
@@ -623,7 +627,8 @@ docker compose up --build
 # Tests (run the FULL suite together, never file-by-file — see §8.31)
 source .venv/bin/activate
 (cd mcp-services  && python -m pytest tests/ -q)   # 94 pass, no setup needed
-(cd agent-backend && python -m pytest tests/ -q)   # 209 pass, 9 skip (no key)
+(cd agent-backend && python -m pytest tests/ -q)   # 208 pass, 9 skip (no key)
+(cd frontend      && npm test)                     # 11 pass (vitest)
 # Bare `pytest tests/` also works now. It did NOT before the Phase C
 # audit -- both suites died at collection, and only `python -m pytest`
 # worked, because it puts the cwd on sys.path. Fixed with a conftest.py

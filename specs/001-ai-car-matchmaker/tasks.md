@@ -1005,15 +1005,59 @@ MCP App WebSocket envelope) and D (the browser host) remain.**
       `transport_security` explicitly. Re-verified in Docker:
       `booking_connected: true` and a real `open_booking_form` call across
       the container network.
-- [ ] T034 [US3] `frontend/src/mcp-app-host/`: Host implementation —
+- [x] T034 [US3] `frontend/src/mcp-app-host/`: Host implementation —
       iframe sandbox creation, deny-by-default CSP, postMessage bridge.
-      **Phase D.** Note the `ext-apps/examples/basic-host` reference in the
+      **DONE (M4a Phase D, 2026-08-09).** Note the `ext-apps/examples/basic-host` reference in the
       original wording is **GitHub-only — it is not in the npm package**;
       `AppBridge` is the real supported API. `AppBridge` accepts a **null**
       MCP client and `oncalltool` is a **public setter**, so the host
       intercepts the App's `tools/call` and tunnels it over the existing
       WebSocket — no MCP client in the browser. Verified by reading the
       1.7.5 bundle. The iframe renders **in the chat column**.
+
+      Three findings from building it, none of them guessable:
+
+      (a) **`AppBridge` is not on the package root.** The root export is
+      the *View* side (the `App` class the bundle imports); the host half
+      is `@modelcontextprotocol/ext-apps/app-bridge`. Importing from the
+      root fails with "has no exported member". The two halves of this
+      protocol look symmetrical and are not.
+
+      (b) **`buildAllowAttribute` is exported and worth using** rather than
+      hand-rolling the Permission-Policy string. There is *no* exported CSP
+      builder, though, so the directive mapping is transcribed from the
+      package's own zod schema descriptions: `connectDomains` → `connect-src`;
+      `resourceDomains` → `img-src`/`script-src`/`style-src`/`font-src`/
+      `media-src`; `frameDomains` → `frame-src`; `baseUriDomains` →
+      `base-uri` (the only one defaulting to `'self'`, not `'none'`).
+      `csp.test.ts` pins all of it.
+
+      (c) **Host style variable names are a fixed enum, not free-form.**
+      TypeScript rejected an invented `--color-background`; the real names
+      (`--color-background-primary`, …) are exactly what
+      `booking-form/src/styles.css` reads. Had it compiled, the variables
+      would have been set on the document, ignored by the stylesheet, and
+      the form would have looked untouched while appearing to be themed.
+      Related: the generated `.d.ts` marks all ~70 variables **required**
+      while the runtime zod schema accepts any subset — verified by parsing
+      one, hence `satisfies Partial<...>` plus a cast.
+
+      **Verified by driving the real form in a real browser**, not by
+      reading: the App renders pre-filled with `LST-0035`'s verbatim record
+      ("2022 Jeep SUV Sport, $17,391, 39,046 mi, Diesel, Phoenix AZ,
+      available 2026-12-19"); a bad email is rejected server-side and the
+      message attaches to the **email** field; **every other typed value
+      survives the round trip**, `notes` included (US3 AS2); and a valid
+      submit produces `BKG-2193B4CAD1` in both the iframe and the chat,
+      with the session advanced to AWAITING_PAYMENT.
+
+      ⚠️ **Known cosmetic gap**: the App is built with ext-apps'
+      `autoResize` and the host handles `onsizechange`, but the
+      notification never arrives, so the iframe keeps its CSS height and a
+      long form scrolls inside its panel. The handshake demonstrably
+      completes (`oninitialized` fires and both tool notifications are
+      delivered), so this is isolated to the size notification. Not chased
+      further — it is presentation, not function.
 - [x] T035 [US3] FORM_FILLING wiring, AWAITING_PAYMENT transition on valid
       submission. **DONE — state half in Phase C1, wire in Phase C2.**
 

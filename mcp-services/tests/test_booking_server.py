@@ -274,7 +274,14 @@ def test_marketplace_is_still_at_its_original_paths():
     """
     response = _client(composed_app).get("/health")
     assert response.status_code == 200
-    assert response.json()["servers"] == ["marketplace"]
+    payload = response.json()
+    # The path and the payload's shape are what M0-M3 depend on. The
+    # `servers` list is process-level and grew with M4b -- it named only
+    # the marketplace until then, which had been false since M4a mounted
+    # booking beside it.
+    assert payload["service"] == "mcp-services"
+    assert payload["listings"] == 203
+    assert payload["servers"] == ["marketplace", "booking", "payment"]
 
 
 def test_booking_is_reachable_under_its_own_prefix():
@@ -315,7 +322,10 @@ def test_composing_runs_both_mounted_lifespans():
     def ping_right() -> str:
         return "right"
 
-    app_under_test = compose(left.streamable_http_app(), right.streamable_http_app())
+    app_under_test = compose(
+        ("/booking", right.streamable_http_app()),
+        ("", left.streamable_http_app()),
+    )
 
     with TestClient(app_under_test) as client:
         for path in ("/mcp", "/booking/mcp"):

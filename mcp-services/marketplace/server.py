@@ -128,11 +128,24 @@ def get_listing_details(listing_id: str) -> dict[str, Any]:
 
 @mcp.custom_route("/health", methods=["GET"])
 async def health(_request: Request) -> JSONResponse:
-    """Kept from the M0 stub so compose/README health checks still work."""
+    """Kept from the M0 stub so compose/README health checks still work.
+
+    This is the **process-level** health route (`service: mcp-services`),
+    not the marketplace's own -- it predates there being more than one
+    server, and it stayed at `/health` so `docker-compose.yml`'s
+    healthcheck and every M0-M3 reader kept working untouched. Booking and
+    payment each have their own at `/booking/health` and `/payment/health`.
+
+    Hence `servers` naming all three. It described the process from the
+    start, so left at `["marketplace"]` it quietly became false the day
+    M4a mounted a second server -- a small claim, but the kind this repo
+    has learned not to leave standing. Listed literally rather than
+    imported from `app.py`, which imports this module.
+    """
     return JSONResponse({
         "status": "ok",
         "service": "mcp-services",
-        "servers": ["marketplace"],
+        "servers": ["marketplace", "booking", "payment"],
         "listings": len(store.load_listings()),
     })
 

@@ -209,7 +209,11 @@ export default function App() {
             log and above the composer so the user can still talk while the
             form is open. */}
         {mcpApp && (
-          <McpAppFrame envelope={mcpApp} onCallTool={callServerTool} />
+          <McpAppFrame
+            key={JSON.stringify(mcpApp.toolInput)}
+            envelope={mcpApp}
+            onCallTool={callServerTool}
+          />
         )}
 
         <div className="composer">

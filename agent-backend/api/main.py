@@ -1018,6 +1018,10 @@ async def chat_ws(websocket: WebSocket, session_id: str):
                             "errors": {"_": "Something went wrong. Please try again."},
                         }},
                     })
+                # After submit_booking transitions to AWAITING_PAYMENT, the
+                # checkout MCP App must be pushed to the browser — same
+                # shape as the action branch's booking_form.maybe_open.
+                await checkout_stream.maybe_open(payment_tools, session)
                 continue
 
             if incoming.get("type") == "action":

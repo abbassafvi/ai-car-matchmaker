@@ -94,7 +94,17 @@ export default function App() {
     wsRef.current = ws;
 
     ws.onopen = () => setConnected(true);
-    ws.onclose = () => setConnected(false);
+    ws.onclose = () => {
+      setConnected(false);
+      // Reject every pending tool call so the MCP App does not sit on
+      // "Submitting…" forever after a disconnect.  The old promises
+      // would otherwise leak: they are keyed by UUID and will never
+      // receive a matching app_tool_result.
+      for (const [, reject] of pendingCalls.current) {
+        reject(new Error("WebSocket closed"));
+      }
+      pendingCalls.current.clear();
+    };
     ws.onmessage = (event) => {
       const data = JSON.parse(event.data);
       if (data.type === "chat") {

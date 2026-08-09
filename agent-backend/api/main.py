@@ -433,12 +433,76 @@ class _BookingFormStream:
         self._requests_seen = session.get("booking_form_requests") or 0
 
 
+class _CheckoutStream:
+    """Per-connection bookkeeping for the checkout MCP App.
+
+    Same rationale as `_BookingFormStream`: the browser has already been
+    shown the checkout App is a property of the *connection*, not of the
+    session.  A reconnecting browser needs the checkout iframe back, but a
+    confirmed session must not re-open it.
+
+    Three things open checkout, one must not:
+
+    - the model calls `open_mock_checkout` ("show me the checkout");
+    - the browser reconnects mid-checkout;
+    - but a confirmed session must **not** reopen checkout.
+    """
+
+    def __init__(self, websocket: WebSocket):
+        self._websocket = websocket
+        self._shown_booking: str | None = None
+        self._requests_seen = 0
+
+    def _should_send(self, session: dict) -> bool:
+        if Phase(session["phase"]) != Phase.AWAITING_PAYMENT:
+            return False
+        booking = session.get("booking") or {}
+        if booking.get("status") != "SUBMITTED":
+            return False
+        # Already confirmed — do not re-open.
+        if session.get("payment_confirmation"):
+            return False
+        # A new booking or a new request counter bump.
+        booking_id = booking.get("id")
+        return (
+            booking_id != self._shown_booking
+            or (session.get("checkout_requests") or 0) > self._requests_seen
+        )
+
+    async def maybe_open(self, payment_tools: list, session: dict) -> None:
+        if not self._should_send(session):
+            return
+        try:
+            envelope = await build_checkout_app_envelope(payment_tools, session)
+        except Exception:
+            log.exception("Could not open checkout for %s", session["session_id"])
+            await self._websocket.send_json({
+                "type": "error",
+                "message": "I couldn't open the checkout. Please try again.",
+            })
+            return
+
+        await self._websocket.send_json(envelope)
+        self._shown_booking = (session.get("booking") or {}).get("id")
+        self._requests_seen = session.get("checkout_requests") or 0
+
+
 def _booking_tool(booking_tools: list, name: str):
     tool = next((t for t in booking_tools or [] if t.name == name), None)
     if tool is None:
         raise RuntimeError(
             f"the booking MCP server did not provide {name!r} -- check "
             f"/health's booking_connected and MCP_BOOKING_URL"
+        )
+    return tool
+
+
+def _payment_tool(payment_tools: list, name: str):
+    tool = next((t for t in payment_tools or [] if t.name == name), None)
+    if tool is None:
+        raise RuntimeError(
+            f"the payment MCP server did not provide {name!r} -- check "
+            f"/health's payment_connected and MCP_PAYMENT_URL"
         )
     return tool
 
@@ -487,6 +551,36 @@ async def build_booking_app_envelope(booking_tools: list, session: dict) -> dict
     }
 
 
+async def build_checkout_app_envelope(payment_tools: list, session: dict) -> dict:
+    """The `mcp_app` message for the checkout App.
+
+    Same shape as `build_booking_app_envelope`: resource, toolInput,
+    toolResult.  Both verbatim records go to the server, not through the
+    model, and the server echoes back only display-safe projections.
+    """
+    state = SessionState.model_validate(session)
+    listing = state.selected_listing()
+    booking = state.booking
+
+    if booking is None or booking.status != "SUBMITTED" or listing is None:
+        raise RuntimeError("no submitted booking to check out")
+
+    payload = await call_structured(
+        _payment_tool(payment_tools, OPEN_MOCK_CHECKOUT_TOOL),
+        {"booking": booking.model_dump(mode="json"), "listing": listing},
+    )
+    resource = await read_app_resource(payload["resourceUri"])
+
+    return {
+        "type": "mcp_app",
+        "app": "checkout",
+        "toolName": OPEN_MOCK_CHECKOUT_TOOL,
+        "resource": resource,
+        "toolInput": {"arguments": {"booking": payload.get("booking"), "listing": payload.get("listing")}},
+        "toolResult": {"structuredContent": payload},
+    }
+
+
 async def _persist_session(agents, config, session: dict) -> None:
     """Write `session` into the checkpointer without running the agent.
 
@@ -524,7 +618,8 @@ async def _persist_session(agents, config, session: dict) -> None:
     """
     if agents is None:
         return
-    await agents.for_phase(Phase.INTERVIEWING).aupdate_state(
+    phase = Phase(session["phase"])
+    await agents.for_phase(phase).aupdate_state(
         config, {"session": session}, as_node="__start__",
     )
 
@@ -585,37 +680,34 @@ async def _handle_action(
 
 
 async def _handle_app_tool_call(
-    websocket: WebSocket, incoming: dict, session: dict, booking_tools: list,
+    websocket: WebSocket, incoming: dict, session: dict,
+    booking_tools: list, payment_tools: list,
     agents=None, config=None,
 ) -> dict:
-    """The MCP App bridge: the iframe's `tools/call`, tunnelled over our WS.
+    """The MCP App bridge: both the booking and checkout iframe's
+    `tools/call`, tunnelled over our WS.
 
-    This is the *only* way `submit_booking` is reachable. It is bound to no
-    phase and no agent (decided 2026-08-09), because its `fields` argument
-    is free-form: a model-callable version could fabricate the user's name
-    and email into a booking they never made. Here the values come from the
-    form the user typed into.
+    Two tools are reachable through this route — one per MCP App — and
+    neither is bound to a model phase (Principle II + III):
 
-    That makes this a second gate, with a different subject. The phase gate
-    decides what the *model* may call; this decides what the *iframe* may
-    call, and the iframe is untrusted input in exactly the way a browser
-    always is. Three things are therefore not taken from the message:
+    - **`submit_booking`** (FORM_FILLING): its `fields` argument is
+      free-form, so a model-callable version could fabricate the user's
+      contact details.  Values arrive from the form the user typed into.
+    - **`confirm_mock_payment`** (AWAITING_PAYMENT): its `fields` argument
+      would be card-like, and a model tool's arguments are written into
+      the message history, checkpointed, and traced — all three of
+      spec.md US4 AS2's prohibitions.  The values arrive from the iframe,
+      but the backend forwards *nothing* the browser sent: `booking_id`
+      comes from persisted state.
 
-    - **which tool.** An allowlist of one. A host bug -- or a compromised
-      App -- must not be able to reach `open_booking_form`, let alone
-      anything the marketplace exposes.
-    - **which phase.** Principle II applies to this route too, or the App
-      bridge becomes the phase-skip that `TOOLS_BY_PHASE` exists to
-      prevent.
-    - **which listing.** The App sends `listing_id` because ext-apps has
-      it, and it is ignored in favour of `selected_listing_id`. Taking the
-      browser's word for which car is being booked would put a value the
-      user never chose into a persisted record.
+    This is a *second gate*, with a different subject from
+    `TOOLS_BY_PHASE`.  That one decides what the *model* may call; this
+    decides what each *iframe* may call, and an iframe is untrusted input.
+    Three things are therefore never taken from the message for either App:
 
-    `available_from` is likewise supplied from the persisted record rather
-    than round-tripped through the browser: it is what the pickup-date
-    check validates against, and a tampered value would let a booking be
-    made for a car before it exists.
+    - **which tool.** An allowlist of one per App.
+    - **which phase.** Principle II applies here too.
+    - **which listing / booking.** Both are read from persisted state.
     """
     call_id = incoming.get("call_id")
 
@@ -624,86 +716,149 @@ async def _handle_app_tool_call(
             "type": "app_tool_result", "call_id": call_id, "result": result,
         })
 
-    if incoming.get("name") != SUBMIT_BOOKING_TOOL:
-        log.warning("Refused app tool call %r from the booking App", incoming.get("name"))
-        await reply({"structuredContent": {
-            "ok": False,
-            "errors": {"_": "That action is not available from this form."},
-        }})
-        return session
-
+    tool_name = incoming.get("name")
     state = SessionState.model_validate(session)
-    listing = state.selected_listing()
-    if state.phase != Phase.FORM_FILLING or listing is None:
-        log.warning("Refused a booking submit in phase %s", state.phase)
-        await reply({"structuredContent": {
-            "ok": False,
-            "errors": {"_": "This booking can no longer be submitted. "
-                            "Pick a car again to start over."},
-        }})
-        return session
 
-    fields = (incoming.get("arguments") or {}).get("fields") or {}
-    try:
-        result = await call_structured(
-            _booking_tool(booking_tools, SUBMIT_BOOKING_TOOL),
-            {
-                "listing_id": state.selected_listing_id,
-                "fields": fields,
-                "available_from": listing.get("availability_date"),
-            },
-        )
-    except Exception:
-        log.exception("submit_booking failed for session %s", session["session_id"])
-        await reply({"structuredContent": {
-            "ok": False,
-            "errors": {"_": "The booking service is unavailable. Please try again."},
-        }})
-        return session
+    # --- checkout: confirm_mock_payment (AWAITING_PAYMENT) -----------------
+    if tool_name == CONFIRM_MOCK_PAYMENT_TOOL:
+        if state.phase != Phase.AWAITING_PAYMENT:
+            log.warning("Refused checkout confirm in phase %s", state.phase)
+            await reply({"structuredContent": {
+                "ok": False,
+                "errors": {"_": "Payment is not available yet. "
+                                "Complete the booking form first."},
+            }})
+            return session
 
-    if not result.get("ok"):
-        # Field-level validation failures are the *expected* path, not an
-        # error: they go straight back to the iframe, which re-renders them
-        # against the values still held in its own `entered` map so nothing
-        # the user typed is lost (spec.md US3 AS2).
+        if state.booking is None or state.booking.status != "SUBMITTED":
+            await reply({"structuredContent": {
+                "ok": False,
+                "errors": {"_": "There is no submitted booking to pay for."},
+            }})
+            return session
+
+        # `booking_id` from persisted state, never from the browser.
+        # `fields` from the iframe are accepted so the allowlist has
+        # something to drop — nothing is forwarded.
+        try:
+            result = await call_structured(
+                _payment_tool(payment_tools, CONFIRM_MOCK_PAYMENT_TOOL),
+                {"booking_id": state.booking.id, "fields": (incoming.get("arguments") or {}).get("fields")},
+            )
+        except Exception:
+            log.exception("confirm_mock_payment failed for session %s", session["session_id"])
+            await reply({"structuredContent": {
+                "ok": False,
+                "errors": {"_": "The payment service is unavailable. Please try again."},
+            }})
+            return session
+
+        if not result.get("ok"):
+            await reply({"structuredContent": result})
+            return session
+
+        confirmation = result["confirmation"]
+        try:
+            state.confirm_payment(PaymentConfirmation(
+                id=confirmation["id"],
+                booking_id=state.booking.id,
+                confirmation_code=confirmation["confirmation_code"],
+                status=confirmation["status"],
+                created_at=confirmation["created_at"],
+            ))
+        except ValueError as exc:
+            log.warning("Refused to record confirmation %s: %s", confirmation["id"], exc)
+            await reply({"structuredContent": {
+                "ok": False, "errors": {"_": "This payment has already been confirmed."},
+            }})
+            return session
+
+        session = state.model_dump(mode="json")
+        await _persist_session(agents, config, session)
         await reply({"structuredContent": result})
+
+        listing = state.selected_listing() or {}
+        await websocket.send_json({
+            "type": "chat", "role": "assistant",
+            "content": (
+                f"Payment confirmed for the {listing.get('year')} "
+                f"{listing.get('brand')} {listing.get('model')}. "
+                f"Confirmation code: {confirmation['confirmation_code']}. "
+                f"Thank you!"
+            ),
+        })
         return session
 
-    record = result["booking"]
-    try:
-        state.submit_booking(Booking(
-            id=record["id"],
-            listing_id=state.selected_listing_id,
-            session_id=state.session_id,
-            submitted_form_fields=record["submitted_form_fields"],
-            status="SUBMITTED",
-        ))
-    except ValueError as exc:
-        # Duplicate submit, or a booking that no longer matches the
-        # selection. The server has already minted an id, but nothing is
-        # persisted, so this is a rejected write rather than a partial one.
-        log.warning("Refused to record booking %s: %s", record["id"], exc)
-        await reply({"structuredContent": {
-            "ok": False, "errors": {"_": "This booking has already been submitted."},
-        }})
+    # --- booking: submit_booking (FORM_FILLING) ----------------------------
+    if tool_name == SUBMIT_BOOKING_TOOL:
+        listing = state.selected_listing()
+        if state.phase != Phase.FORM_FILLING or listing is None:
+            log.warning("Refused a booking submit in phase %s", state.phase)
+            await reply({"structuredContent": {
+                "ok": False,
+                "errors": {"_": "This booking can no longer be submitted. "
+                                "Pick a car again to start over."},
+            }})
+            return session
+
+        fields = (incoming.get("arguments") or {}).get("fields") or {}
+        try:
+            result = await call_structured(
+                _booking_tool(booking_tools, SUBMIT_BOOKING_TOOL),
+                {
+                    "listing_id": state.selected_listing_id,
+                    "fields": fields,
+                    "available_from": listing.get("availability_date"),
+                },
+            )
+        except Exception:
+            log.exception("submit_booking failed for session %s", session["session_id"])
+            await reply({"structuredContent": {
+                "ok": False,
+                "errors": {"_": "The booking service is unavailable. Please try again."},
+            }})
+            return session
+
+        if not result.get("ok"):
+            await reply({"structuredContent": result})
+            return session
+
+        record = result["booking"]
+        try:
+            state.submit_booking(Booking(
+                id=record["id"],
+                listing_id=state.selected_listing_id,
+                session_id=state.session_id,
+                submitted_form_fields=record["submitted_form_fields"],
+                status="SUBMITTED",
+            ))
+        except ValueError as exc:
+            log.warning("Refused to record booking %s: %s", record["id"], exc)
+            await reply({"structuredContent": {
+                "ok": False, "errors": {"_": "This booking has already been submitted."},
+            }})
+            return session
+
+        session = state.model_dump(mode="json")
+        await _persist_session(agents, config, session)
+        await reply({"structuredContent": result})
+
+        await websocket.send_json({
+            "type": "chat", "role": "assistant",
+            "content": (
+                f"Your booking for the {listing.get('year')} {listing.get('brand')} "
+                f"{listing.get('model')} is submitted — reference {record['id']}. "
+                "Payment is the next step."
+            ),
+        })
         return session
 
-    session = state.model_dump(mode="json")
-    await _persist_session(agents, config, session)
-    await reply({"structuredContent": result})
-
-    # Deterministic, not a model turn: it restates the booking reference and
-    # the car from records, and spending an LLM round trip to say "got it"
-    # would add latency and a hallucination surface (the same call
-    # `_handle_action` makes).
-    await websocket.send_json({
-        "type": "chat", "role": "assistant",
-        "content": (
-            f"Your booking for the {listing.get('year')} {listing.get('brand')} "
-            f"{listing.get('model')} is submitted — reference {record['id']}. "
-            "Payment is the next step."
-        ),
-    })
+    # --- unknown tool ------------------------------------------------------
+    log.warning("Refused app tool call %r", tool_name)
+    await reply({"structuredContent": {
+        "ok": False,
+        "errors": {"_": "That action is not available from this form."},
+    }})
     return session
 
 
@@ -793,7 +948,9 @@ async def chat_ws(websocket: WebSocket, session_id: str):
     session = await _load_session(agents, config, session_id)
     surfaces = _SurfaceStream(websocket)
     booking_tools = websocket.app.state.booking_tools
+    payment_tools = websocket.app.state.payment_tools
     booking_form = _BookingFormStream(websocket)
+    checkout_stream = _CheckoutStream(websocket)
 
     # The initial push is inside the same `try` as the message loop, not
     # before it. A browser reload closes the old socket while the backend
@@ -831,6 +988,9 @@ async def chat_ws(websocket: WebSocket, session_id: str):
         # marked selected and no way to proceed.
         await booking_form.maybe_open(booking_tools, session)
 
+        # A session resumed in AWAITING_PAYMENT gets its checkout back.
+        await checkout_stream.maybe_open(payment_tools, session)
+
         while True:
             incoming = await websocket.receive_json()
 
@@ -844,7 +1004,9 @@ async def chat_ws(websocket: WebSocket, session_id: str):
             if incoming.get("type") == "app_tool_call":
                 try:
                     session = await _handle_app_tool_call(
-                        websocket, incoming, session, booking_tools, agents, config,
+                        websocket, incoming, session,
+                        booking_tools, payment_tools,
+                        agents, config,
                     )
                 except Exception:
                     log.exception("App tool call failed for session %s", session_id)
@@ -884,6 +1046,7 @@ async def chat_ws(websocket: WebSocket, session_id: str):
                 # and for the same reason (Principle II: the state machine
                 # drives, not the LLM).
                 await booking_form.maybe_open(booking_tools, session)
+                await checkout_stream.maybe_open(payment_tools, session)
                 continue
 
             if incoming.get("type") != "chat" or not incoming.get("content"):
@@ -1007,10 +1170,11 @@ async def chat_ws(websocket: WebSocket, session_id: str):
             # Last, after every model turn: the model may have called
             # `select_listing` ("I'll take the Jeep") or `open_booking_form`
             # ("show me the form again"), and neither can push to this
-            # socket from inside a graph run. Checked here rather than
+            # socket from inside a graph run.  Checked here rather than
             # branched on the tool actually called, so the prose path and
             # the click path converge on one piece of code -- which is the
             # guarantee §14 finding 5 showed had quietly stopped holding.
             await booking_form.maybe_open(booking_tools, session)
+            await checkout_stream.maybe_open(payment_tools, session)
     except WebSocketDisconnect:
         pass

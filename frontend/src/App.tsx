@@ -188,15 +188,22 @@ export default function App() {
 
   const surfaces = rawSurfaces.filter((s) => s.id !== "interview-progress");
 
-  // Auto-open drawer when catalogue first appears
-  const hasCatalogue = surfaces.some((s) => s.id === "catalogue");
-  const prevHasCatalogue = useRef(false);
+  // Auto-open drawer when the backend sends new/updated surfaces.
+  // The processor fires onSurfaceCreated for new surfaces and
+  // onSurfaceDeleted for removed ones — but catalogue updates are
+  // in-place (no event).  We track a fingerprint of all surface IDs +
+  // component counts so any change (new surface, removed surface, or
+  // updated content) triggers auto-open.
+  const fingerprint = surfaces
+    .map((s) => `${s.id}:${(s as any).components?.length ?? 0}`)
+    .join("|");
+  const prevFingerprint = useRef(fingerprint);
   useEffect(() => {
-    if (hasCatalogue && !prevHasCatalogue.current) {
+    if (fingerprint !== prevFingerprint.current && fingerprint) {
       setDrawerOpen(true);
     }
-    prevHasCatalogue.current = hasCatalogue;
-  }, [hasCatalogue]);
+    prevFingerprint.current = fingerprint;
+  }, [fingerprint]);
 
   return (
     <div className="app">

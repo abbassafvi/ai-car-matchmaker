@@ -8,6 +8,8 @@ catalogue/progress UI driven by [A2UI](https://a2ui.org/).
 
 Built for the Amulate Summer Hackathon 2026.
 
+**[→ Quick Setup Guide](SETUP.md)** — Get running in 5 minutes with Docker.
+
 ## Status
 
 **All 5 user stories complete.** M0–M4c delivered:

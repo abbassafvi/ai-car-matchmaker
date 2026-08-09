@@ -90,41 +90,59 @@ export default function App() {
   }, [processor]);
 
   useEffect(() => {
-    const ws = new WebSocket(`ws://${WS_HOST}:${WS_PORT}/ws/${getSessionId()}`);
-    wsRef.current = ws;
+    let retries = 0;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    let unmounted = false;
 
-    ws.onopen = () => setConnected(true);
-    ws.onclose = () => {
-      setConnected(false);
-      // Reject every pending tool call so the MCP App does not sit on
-      // "Submitting…" forever after a disconnect.  The old promises
-      // would otherwise leak: they are keyed by UUID and will never
-      // receive a matching app_tool_result.
-      for (const [, reject] of pendingCalls.current) {
-        reject(new Error("WebSocket closed"));
-      }
-      pendingCalls.current.clear();
-    };
-    ws.onmessage = (event) => {
-      const data = JSON.parse(event.data);
-      if (data.type === "chat") {
-        setMessages((prev) => [...prev, { role: data.role, content: data.content }]);
-      } else if (data.type === "a2ui") {
-        processor.processMessages(data.messages);
-      } else if (data.type === "error") {
-        setMessages((prev) => [...prev, { role: "assistant", content: `⚠️ ${data.message}` }]);
-      } else if (data.type === "mcp_app") {
-        setMcpApp(data as McpAppEnvelope);
-      } else if (data.type === "app_tool_result") {
-        const resolve = pendingCalls.current.get(data.call_id);
-        if (resolve) {
-          pendingCalls.current.delete(data.call_id);
-          resolve(data.result?.structuredContent ?? {});
+    function connect() {
+      const ws = new WebSocket(`ws://${WS_HOST}:${WS_PORT}/ws/${getSessionId()}`);
+      wsRef.current = ws;
+
+      ws.onopen = () => {
+        retries = 0;
+        setConnected(true);
+      };
+      ws.onclose = () => {
+        setConnected(false);
+        // Reject every pending tool call so the MCP App does not sit on
+        // "Submitting…" forever after a disconnect.
+        for (const [, reject] of pendingCalls.current) {
+          reject(new Error("WebSocket closed"));
         }
-      }
-    };
+        pendingCalls.current.clear();
+        // Auto-reconnect with exponential backoff (1s, 2s, 4s, … cap 30s).
+        if (!unmounted) {
+          const delay = Math.min(1000 * 2 ** retries, 30_000);
+          retries += 1;
+          timer = setTimeout(connect, delay);
+        }
+      };
+      ws.onmessage = (event) => {
+        const data = JSON.parse(event.data);
+        if (data.type === "chat") {
+          setMessages((prev) => [...prev, { role: data.role, content: data.content }]);
+        } else if (data.type === "a2ui") {
+          processor.processMessages(data.messages);
+        } else if (data.type === "error") {
+          setMessages((prev) => [...prev, { role: "assistant", content: `⚠️ ${data.message}` }]);
+        } else if (data.type === "mcp_app") {
+          setMcpApp(data as McpAppEnvelope);
+        } else if (data.type === "app_tool_result") {
+          const resolve = pendingCalls.current.get(data.call_id);
+          if (resolve) {
+            pendingCalls.current.delete(data.call_id);
+            resolve(data.result?.structuredContent ?? {});
+          }
+        }
+      };
+    }
 
-    return () => ws.close();
+    connect();
+    return () => {
+      unmounted = true;
+      if (timer) clearTimeout(timer);
+      wsRef.current?.close();
+    };
   }, [processor]);
 
   // Keep the newest message in view; a research turn appends several.

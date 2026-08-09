@@ -1171,11 +1171,11 @@ leaving the chat window (SC-003).
 
 **Independent Test**: Per spec.md US5.
 
-- [ ] T041 [US5] Integration test: kill/restart `agent-backend` mid-session,
+- [x] T041 [US5] Integration test: kill/restart `agent-backend` mid-session,
       reconnect, verify phase + all captured entities intact (SC-005)
-- [ ] T042 [US5] Integration test: two concurrent sessions do not leak state
+- [x] T042 [US5] Integration test: two concurrent sessions do not leak state
       into each other
-- [ ] T043 [US5] `frontend`: reconnect/resume UX (re-establish WS/SSE,
+- [x] T043 [US5] `frontend`: reconnect/resume UX (re-establish WS/SSE,
       re-render current phase's A2UI surface from persisted state)
 
 **Checkpoint**: All 5 user stories independently functional and demoable.

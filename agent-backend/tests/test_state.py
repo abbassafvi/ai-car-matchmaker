@@ -4,7 +4,7 @@ from agent.state import Phase, SessionState
 def test_missing_slots_all_empty_on_new_session():
     s = SessionState(session_id="s1")
     assert set(s.interview.missing_slots()) == {
-        "use_case", "category", "budget_max", "transaction_type", "target_date",
+        "use_case", "category", "budget_max", "transaction_type",
     }
     assert not s.interview.is_complete()
 

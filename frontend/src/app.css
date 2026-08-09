@@ -1,31 +1,102 @@
-/* Chat shell. Kept separate from a2ui-theme.css, which exists purely to
- * theme the agent-generated surfaces. */
+/* Chat shell — two-pane layout with dark mode support. */
+
+/* --- custom properties -------------------------------------------------- */
+:root {
+  --bg: #ffffff;
+  --bg-secondary: #f6f8fa;
+  --text: #1c2024;
+  --text-secondary: #5d6f79;
+  --text-muted: #7b8794;
+  --border: #e4e9ef;
+  --border-strong: #d3dae2;
+  --accent: #0b63ce;
+  --accent-hover: #0a55b0;
+  --accent-bg: #eef4fc;
+  --accent-border: #c4ddf7;
+  --error-bg: #fef2f2;
+  --error-text: #dc2626;
+  --error-border: #fca5a5;
+  --user-bubble: #0b63ce;
+  --user-text: #ffffff;
+  --assistant-bg: transparent;
+  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-mono: "SF Mono", "Cascadia Code", "Fira Code", monospace;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0f1117;
+    --bg-secondary: #1a1d27;
+    --text: #e4e7ec;
+    --text-secondary: #9aa5b4;
+    --text-muted: #6b7280;
+    --border: #2a2d37;
+    --border-strong: #3a3d47;
+    --accent: #3b82f6;
+    --accent-hover: #2563eb;
+    --accent-bg: #1e2a3f;
+    --accent-border: #2563eb;
+    --error-bg: #2d1b1b;
+    --error-text: #fca5a5;
+    --error-border: #7f1d1d;
+    --user-bubble: #2563eb;
+    --user-text: #ffffff;
+    --assistant-bg: transparent;
+  }
+}
+
+/* --- base --------------------------------------------------------------- */
+*, *::before, *::after { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  font-family: var(--font-sans);
+  font-size: 15px;
+  line-height: 1.5;
+  color: var(--text);
+  background: var(--bg);
+  -webkit-font-smoothing: antialiased;
+  font-variant-numeric: tabular-nums;
+}
 
 .app {
   display: flex;
   height: 100vh;
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
-    "Helvetica Neue", Arial, sans-serif;
-  color: #1c2024;
-  background: #ffffff;
+  overflow: hidden;
 }
 
-/* --- chat column ------------------------------------------------------ */
+/* --- disconnect banner -------------------------------------------------- */
+.disconnect-banner {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 1000;
+  padding: 8px 16px;
+  background: var(--error-bg);
+  color: var(--error-text);
+  border-bottom: 1px solid var(--error-border);
+  font-size: 13px;
+  font-weight: 500;
+  text-align: center;
+}
 
+/* --- chat column -------------------------------------------------------- */
 .chat {
-  flex: 1;
+  flex: 1 1 50%;
   min-width: 320px;
   display: flex;
   flex-direction: column;
   padding: 18px 20px 16px;
-  background: #ffffff;
+  background: var(--bg);
   min-height: 0;
+  border-right: 1px solid var(--border);
 }
 
 .chat-header {
   display: flex;
   align-items: center;
-  gap: 10px;
+  justify-content: space-between;
   margin: 0 0 14px;
 }
 
@@ -36,22 +107,20 @@
   letter-spacing: -0.01em;
 }
 
-.chat-status {
-  font-size: 11px;
+.chat-restart {
+  border: 1px solid var(--border-strong);
+  background: var(--bg);
+  color: var(--text-secondary);
+  font-size: 12px;
   font-weight: 600;
-  padding: 3px 9px;
-  border-radius: 999px;
-  background: #eef7ee;
-  color: #216c2a;
-  border: 1px solid #cfe7d1;
+  padding: 5px 10px;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
 }
+.chat-restart:hover { background: var(--bg-secondary); color: var(--text); }
 
-.chat-status[data-connected="false"] {
-  background: #fdeeee;
-  color: #a3242b;
-  border-color: #f2cdcf;
-}
-
+/* --- chat log ----------------------------------------------------------- */
 .chat-log {
   flex: 1;
   overflow-y: auto;
@@ -59,129 +128,205 @@
   padding-right: 4px;
 }
 
-.chat-empty {
-  margin-top: 8px;
-}
-
+.chat-empty { margin-top: 8px; }
 .chat-empty-text {
-  color: #7b8794;
-  font-size: 13.5px;
+  color: var(--text-muted);
+  font-size: 14px;
   line-height: 1.6;
   margin: 0 0 12px;
 }
 
-.chat-chips {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-
+.chat-chips { display: flex; flex-wrap: wrap; gap: 8px; }
 .chat-chip {
   padding: 8px 14px;
   font-size: 13px;
   font-family: inherit;
-  color: #0b63ce;
-  background: #eef4fc;
-  border: 1px solid #c4ddf7;
+  color: var(--accent);
+  background: var(--accent-bg);
+  border: 1px solid var(--accent-border);
   border-radius: 999px;
   cursor: pointer;
   transition: background 0.15s, border-color 0.15s;
 }
+.chat-chip:hover { background: var(--accent-bg); border-color: var(--accent); }
 
-.chat-chip:hover {
-  background: #dbe9fa;
-  border-color: #0b63ce;
+/* Resumed session */
+.chat-resumed {
+  padding: 12px 16px;
+  margin-bottom: 12px;
+  background: var(--accent-bg);
+  border: 1px solid var(--accent-border);
+  border-radius: 10px;
+}
+.chat-resumed-text {
+  margin: 0;
+  font-size: 13.5px;
+  color: var(--text-secondary);
 }
 
-.chat-row {
+/* Reasoning trace — inline in chat */
+.chat-reasoning {
   display: flex;
-  margin: 10px 0;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 8px 0;
+  padding: 10px 14px;
+  background: var(--bg-secondary);
+  border-radius: 10px;
+  border: 1px solid var(--border);
+}
+.reasoning-step {
+  font-size: 12px;
+  color: var(--text-muted);
+  padding: 3px 8px;
+  background: var(--bg);
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  animation: fadeIn 0.3s ease;
 }
 
-.chat-row[data-role="user"] {
-  justify-content: flex-end;
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(2px); }
+  to { opacity: 1; transform: translateY(0); }
 }
+
+/* Chat rows */
+.chat-row { display: flex; margin: 10px 0; }
+.chat-row[data-role="user"] { justify-content: flex-end; }
 
 .chat-bubble {
   max-width: 82%;
   padding: 9px 13px;
   border-radius: 14px;
-  font-size: 13.5px;
+  font-size: 14px;
   line-height: 1.5;
   white-space: pre-wrap;
   word-break: break-word;
 }
-
 .chat-row[data-role="user"] .chat-bubble {
-  background: #0b63ce;
-  color: #ffffff;
+  background: var(--user-bubble);
+  color: var(--user-text);
   border-bottom-right-radius: 5px;
 }
 
-.chat-row[data-role="assistant"] .chat-bubble {
-  background: #f1f4f8;
-  color: #1c2024;
-  border-bottom-left-radius: 5px;
+/* Assistant prose — no bubble, just text */
+.chat-prose {
+  max-width: 88%;
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--text);
 }
 
-/* --- typing indicator -------------------------------------------------- */
-
-.typing-indicator {
-  display: inline-flex;
-  gap: 4px;
+/* Error + retry */
+.chat-error {
+  display: flex;
   align-items: center;
-  padding: 10px 16px;
+  gap: 10px;
+  padding: 10px 14px;
+  margin: 8px 0;
+  background: var(--error-bg);
+  border: 1px solid var(--error-border);
+  border-radius: 10px;
 }
+.chat-error-text {
+  font-size: 13px;
+  color: var(--error-text);
+  flex: 1;
+}
+.chat-retry {
+  padding: 5px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  font-family: inherit;
+  color: var(--error-text);
+  background: transparent;
+  border: 1px solid var(--error-border);
+  border-radius: 6px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.15s;
+}
+.chat-retry:hover { background: var(--error-bg); }
 
+/* --- typing indicator --------------------------------------------------- */
+.typing-indicator { display: inline-flex; gap: 4px; align-items: center; padding: 10px 16px; }
 .typing-dot {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: #9aa5b4;
+  width: 7px; height: 7px; border-radius: 50%;
+  background: var(--text-muted);
   animation: typingBounce 1.4s infinite ease-in-out;
 }
-
 .typing-dot:nth-child(2) { animation-delay: 0.2s; }
 .typing-dot:nth-child(3) { animation-delay: 0.4s; }
-
 @keyframes typingBounce {
   0%, 60%, 100% { transform: translateY(0); opacity: 0.4; }
   30% { transform: translateY(-5px); opacity: 1; }
 }
 
-/* --- composer --------------------------------------------------------- */
+/* --- brief chips (above composer) --------------------------------------- */
+.brief-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 8px 0;
+  border-top: 1px solid var(--border);
+}
+.brief-chip {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 10px;
+  font-size: 12px;
+  font-family: inherit;
+  color: var(--text-secondary);
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+}
+.brief-chip:hover {
+  background: var(--accent-bg);
+  border-color: var(--accent-border);
+  color: var(--accent);
+}
+.brief-chip-label {
+  font-weight: 600;
+  color: var(--text-muted);
+}
+.brief-chip-value {
+  font-weight: 500;
+}
 
+/* --- composer ----------------------------------------------------------- */
 .composer {
   display: flex;
   gap: 8px;
   padding-top: 12px;
-  border-top: 1px solid #e4e9ef;
+  border-top: 1px solid var(--border);
 }
-
 .composer input {
   flex: 1;
   padding: 10px 12px;
-  font-size: 13.5px;
+  font-size: 14px;
   font-family: inherit;
-  color: inherit;
-  background: #ffffff;
-  border: 1px solid #d3dae2;
+  color: var(--text);
+  background: var(--bg);
+  border: 1px solid var(--border-strong);
   border-radius: 9px;
   outline: none;
+  transition: border-color 0.15s, box-shadow 0.15s;
 }
-
 .composer input:focus {
-  border-color: #0b63ce;
+  border-color: var(--accent);
   box-shadow: 0 0 0 3px rgba(11, 99, 206, 0.12);
 }
-
 .composer button {
   padding: 10px 14px;
-  font-size: 13.5px;
+  font-size: 14px;
   font-weight: 600;
   font-family: inherit;
-  color: #ffffff;
-  background: #0b63ce;
+  color: var(--user-text);
+  background: var(--accent);
   border: 0;
   border-radius: 9px;
   cursor: pointer;
@@ -190,173 +335,38 @@
   justify-content: center;
   transition: background 0.15s;
 }
+.composer button:hover { background: var(--accent-hover); }
+.composer button:disabled { background: var(--border-strong); cursor: not-allowed; }
 
-.composer button:hover {
-  background: #0a55b0;
-}
-
-.composer button:disabled {
-  background: #b6c2d0;
-  cursor: not-allowed;
-}
-
-/* --- surfaces column -------------------------------------------------- */
-
-.surfaces-empty {
-  color: #7b8794;
-  font-size: 13px;
-}
-
-.a2ui-surface {
-  margin-bottom: 22px;
-}
-
-/* --- slide-out drawer ------------------------------------------------- */
-
-.drawer-toggle {
-  position: fixed;
-  top: 14px;
-  right: 14px;
-  z-index: 100;
-  width: 40px;
-  height: 40px;
-  border-radius: 10px;
-  border: 1px solid #d3dae2;
-  background: #ffffff;
-  color: #1c2024;
-  font-size: 18px;
-  cursor: pointer;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  transition: background 0.15s, box-shadow 0.15s;
-  position: relative;
-}
-
-.drawer-badge {
-  position: absolute;
-  top: -5px;
-  right: -5px;
-  min-width: 18px;
-  height: 18px;
-  border-radius: 999px;
-  background: #dc2626;
-  color: #ffffff;
-  font-size: 11px;
-  font-weight: 700;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 0 4px;
-  line-height: 1;
-  animation: badgePop 0.3s ease;
-}
-
-@keyframes badgePop {
-  0% { transform: scale(0); }
-  60% { transform: scale(1.2); }
-  100% { transform: scale(1); }
-}
-
-.drawer-toggle:hover {
-  background: #f1f4f8;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
-}
-
-.drawer {
-  position: fixed;
-  top: 0;
-  right: 0;
-  width: 420px;
-  max-width: 90vw;
-  height: 100vh;
-  background: #f6f8fa;
-  box-shadow: -4px 0 20px rgba(0, 0, 0, 0.12);
-  transform: translateX(100%);
-  transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-  z-index: 200;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-}
-
-.drawer--open {
-  transform: translateX(0);
-}
-
-.drawer-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 16px 20px;
-  border-bottom: 1px solid #e4e9ef;
-  background: #ffffff;
-  flex-shrink: 0;
-}
-
-.drawer-title {
-  font-size: 16px;
-  font-weight: 700;
-  margin: 0;
-}
-
-.drawer-close {
-  width: 32px;
-  height: 32px;
-  border-radius: 8px;
-  border: none;
-  background: transparent;
-  color: #7b8794;
-  font-size: 16px;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  transition: background 0.15s, color 0.15s;
-}
-
-.drawer-close:hover {
-  background: #e4e9ef;
-  color: #1c2024;
-}
-
-.drawer-body {
-  flex: 1;
-  overflow-y: auto;
+/* --- right pane (surfaces) ---------------------------------------------- */
+.surfaces {
+  flex: 1 1 50%;
+  min-width: 340px;
   padding: 18px 20px;
+  overflow-y: auto;
+  background: var(--bg-secondary);
 }
-
-.drawer-backdrop {
-  position: fixed;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.3);
-  z-index: 150;
-  animation: fadeIn 0.2s ease;
+.surfaces-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  color: var(--text-muted);
+  font-size: 14px;
 }
+.a2ui-surface { margin-bottom: 22px; }
 
-@keyframes fadeIn {
-  from { opacity: 0; }
-  to { opacity: 1; }
-}
-
-/* --- MCP App host (M4a Phase D) -----------------------------------------
-   The booking form is an iframe in the chat column, not a panel: hackathon
-   requirement #3 is that the transaction happens inside the conversation.
-   It is capped and scrollable rather than allowed to grow, so a long form
-   cannot push the composer off screen and strand the user with no way to
-   type. The App resizes itself (ext-apps `autoResize`), and the height is
-   driven by content up to that cap. */
+/* --- MCP App host ------------------------------------------------------- */
 .mcp-app {
-  border-top: 1px solid var(--line, #e5e7eb);
-  background: var(--panel, #f8fafc);
+  border-top: 1px solid var(--border);
+  background: var(--bg-secondary);
   padding: 0.75rem;
   max-height: 60vh;
   overflow-y: auto;
   flex: 0 0 auto;
   position: relative;
+  z-index: 10;
 }
-
 .mcp-app-cancel {
   position: absolute;
   top: 8px;
@@ -365,9 +375,9 @@
   width: 28px;
   height: 28px;
   border-radius: 8px;
-  border: 1px solid #d3dae2;
-  background: #ffffff;
-  color: #7b8794;
+  border: 1px solid var(--border-strong);
+  background: var(--bg);
+  color: var(--text-muted);
   font-size: 14px;
   cursor: pointer;
   display: flex;
@@ -376,90 +386,33 @@
   transition: background 0.15s, color 0.15s;
   box-shadow: 0 1px 4px rgba(0, 0, 0, 0.1);
 }
-
-.mcp-app-cancel:hover {
-  background: #fee2e2;
-  color: #dc2626;
-  border-color: #fca5a5;
-}
-
+.mcp-app-cancel:hover { background: var(--error-bg); color: var(--error-text); border-color: var(--error-border); }
 .mcp-app iframe {
   display: block;
   width: 100%;
-  /* A sandboxed iframe has no transparent background of its own in every
-     browser, so it is given one explicitly rather than showing through as
-     white-on-white against the panel. */
-  background: #ffffff;
-  border: 1px solid var(--line, #e5e7eb);
+  background: var(--bg);
+  border: 1px solid var(--border);
   border-radius: 10px;
-  /* A floor only. The real height is set by the host from the App's own
-     size-changed notifications; this is what it looks like in the moment
-     before the first one arrives. */
   min-height: 12rem;
 }
 
-/* --- header actions --------------------------------------------------- */
-
-.chat-header-right {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-
-/* "Start over" — CONFIRMED binds no tools and no transition leaves it, so
-   without this the app is a dead end after a successful checkout and the
-   only way to run a second demo is to clear site data. */
-.chat-restart {
-  border: 1px solid #d3dae2;
-  background: #ffffff;
-  color: #5d6f79;
-  font-size: 12px;
-  font-weight: 600;
-  padding: 5px 10px;
-  border-radius: 8px;
-  cursor: pointer;
-  transition: background 0.15s, color 0.15s, border-color 0.15s;
-}
-
-.chat-restart:hover {
-  background: #f1f4f8;
-  color: #1c2024;
-}
-
-.chat-restart:focus-visible,
+/* --- focus states ------------------------------------------------------- */
 .chat-chip:focus-visible,
-.drawer-close:focus-visible,
-.drawer-toggle:focus-visible {
-  outline: 2px solid #2563eb;
+.chat-restart:focus-visible,
+.brief-chip:focus-visible {
+  outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
 
-/* Markdown rendered from model output (see renderMarkdown in App.tsx).
-   Each source line becomes its own block so "- item" lists read as lists
-   rather than as one run-on paragraph. */
-.chat-line {
-  display: block;
-}
+/* --- markdown ----------------------------------------------------------- */
+.chat-line { display: block; }
+.chat-line:empty { height: 0.5em; }
+.chat-line--bullet { padding-left: 1.1em; position: relative; }
+.chat-line--bullet::before { content: "•"; position: absolute; left: 0.25em; opacity: 0.55; }
 
-.chat-line:empty {
-  height: 0.5em;
-}
-
-.chat-line--bullet {
-  padding-left: 1.1em;
-  position: relative;
-}
-
-.chat-line--bullet::before {
-  content: "•";
-  position: absolute;
-  left: 0.25em;
-  opacity: 0.55;
-}
-
-/* The booking/checkout App is the active task when it is on screen, so it
-   sits above the drawer's backdrop rather than under it. The drawer also
-   closes itself when an App arrives; this is the belt to that braces. */
-.mcp-app {
-  z-index: 160;
+/* --- mobile ------------------------------------------------------------- */
+@media (max-width: 800px) {
+  .app { flex-direction: column; }
+  .chat { flex: none; border-right: 0; border-bottom: 1px solid var(--border); height: 55vh; min-width: 0; }
+  .surfaces { flex: none; min-width: 0; }
 }

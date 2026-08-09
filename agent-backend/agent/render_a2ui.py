@@ -79,6 +79,15 @@ def icon(name: str) -> dict:
     return {"svgPath": ICON_PATHS[name]}
 
 
+def _fit_label(score: float) -> str:
+    """Qualitative fit label — replaces the raw decimal."""
+    if score >= 0.75:
+        return "Strong match"
+    if score >= 0.50:
+        return "Good match"
+    return "Stretch"
+
+
 # Semantic step kind (agent/research.py) -> icon. The mapping lives here
 # rather than in research.py so the domain layer never names UI assets, and
 # an unrecognised kind falls back to a neutral icon rather than rendering
@@ -398,7 +407,7 @@ def _catalogue_rows(
             ),
             "source": _display(listing.get("listing_source") or ""),
             "reasoning": rec.reasoning if rec else "",
-            "fit_label": f"Fit {rec.fit_score:.2f}" if rec else "",
+            "fit_label": _fit_label(rec.fit_score) if rec else "",
             # Selection state is data, not a separate component tree: A2UI
             # has no conditional rendering, so the button's label carries the
             # state and every card keeps the same shape.

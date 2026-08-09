@@ -24,10 +24,23 @@ from typing import Any, Optional
 
 from agent.state import RankedRecommendation
 
-# Sums to 1.0. Price headroom leads because budget is the constraint users
-# state most concretely; age and mileage follow as the two condition proxies
-# present in every record.
+# Default weights — sums to 1.0.
 WEIGHTS = {"value": 0.45, "recency": 0.30, "mileage": 0.25}
+
+# Use-case-specific weight overrides.
+USE_CASE_WEIGHTS: dict[str, dict[str, float]] = {
+    "family": {"value": 0.35, "recency": 0.25, "mileage": 0.40},  # mileage/seats matter most
+    "commuting": {"value": 0.50, "recency": 0.20, "mileage": 0.30},  # fuel efficiency / value
+    "road_trip": {"value": 0.30, "recency": 0.40, "mileage": 0.30},  # newer + seats
+    "work": {"value": 0.55, "recency": 0.15, "mileage": 0.30},  # value first
+    "off_road": {"value": 0.35, "recency": 0.30, "mileage": 0.35},  # balanced
+}
+
+
+def _weights_for_use_case(interview: dict[str, Any]) -> dict[str, float]:
+    """Return weight set tuned to the stated use case."""
+    use_case = (interview.get("use_case") or "").lower().replace(" ", "_")
+    return USE_CASE_WEIGHTS.get(use_case, WEIGHTS)
 
 
 def price_basis(listing: dict[str, Any], transaction_type: str | None) -> str:
@@ -215,13 +228,14 @@ def rank(
     mileage_scores = _normalise(_filled(mileages, max), higher_is_better=False)
 
     scored = []
+    w = _weights_for_use_case(interview)
     for listing, value, recency, mileage in zip(
         listings, value_scores, recency_scores, mileage_scores
     ):
         fit = (
-            WEIGHTS["value"] * value
-            + WEIGHTS["recency"] * recency
-            + WEIGHTS["mileage"] * mileage
+            w["value"] * value
+            + w["recency"] * recency
+            + w["mileage"] * mileage
         )
         scored.append((round(fit, 4), listing))
 

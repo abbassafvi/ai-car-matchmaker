@@ -12,7 +12,7 @@ from pydantic import BaseModel, Field
 
 from observability.spans import record_phase_transition
 
-REQUIRED_INTERVIEW_SLOTS = ["use_case", "category", "budget_max", "transaction_type", "target_date"]
+REQUIRED_INTERVIEW_SLOTS = ["use_case", "category", "budget_max", "transaction_type"]
 
 
 class Phase(str, Enum):

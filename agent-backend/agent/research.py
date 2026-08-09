@@ -186,7 +186,10 @@ async def run_research(
     outcome.add_step("search", _describe_query(query))
 
     try:
-        structured = await _call_search(search, query, slate_size)
+        # Wide slate: search with limit=50 to avoid structural cheapest-first
+        # bias, rank all of them, then truncate to slate_size after ranking.
+        search_limit = 50
+        structured = await _call_search(search, query, search_limit)
 
         for step, label in RELAXATION_LADDER:
             if structured["listings"]:
@@ -199,7 +202,7 @@ async def run_research(
                 "relax", f"No matches — relaxing the {label} and searching again."
             )
             query = widened
-            structured = await _call_search(search, query, slate_size)
+            structured = await _call_search(search, query, search_limit)
 
         outcome.query = structured.get("query", query)
         outcome.listings = structured["listings"]
@@ -218,10 +221,14 @@ async def run_research(
     )
     outcome.recommendations = rank(outcome.listings, interview)
     outcome.listings = order_listings_by(outcome.listings, outcome.recommendations)
+
+    # Truncate to slate_size AFTER ranking so the best N survive.
+    outcome.recommendations = outcome.recommendations[:slate_size]
+    outcome.listings = outcome.listings[:slate_size]
+
     outcome.add_step(
         "top",
-        f"Top pick: {outcome.recommendations[0].listing_id} "
-        f"(fit {outcome.recommendations[0].fit_score:.2f}).",
+        f"Top pick: {outcome.recommendations[0].listing_id}.",
     )
     return outcome
 

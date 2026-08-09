@@ -77,6 +77,7 @@ from agent.research import SEARCH_TOOL, narration_brief, run_research  # noqa: E
 from agent.state import (  # noqa: E402
     Booking,
     InterviewState,
+    PaymentConfirmation,
     Phase,
     RankedRecommendation,
     SessionState,

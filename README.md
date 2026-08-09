@@ -10,37 +10,23 @@ Built for the Amulate Summer Hackathon 2026.
 
 ## Status
 
-M0 (scaffolding) + M1 (foundational) + M2 (conversational interview, User
-Story 1) + M2.5 (audit remediation) complete. **M3 (research & ranked
-recommendations, User Story 2) is complete** — the marketplace MCP server
-is built, the agent runs fully async against it, and interview → automatic
-research → deterministically ranked, explained recommendations now works end
-to end and **renders live as A2UI surfaces**: an interview checklist, a
-reasoning-steps trace of how the search ran, and a catalogue of ranked cards.
-Listing selection works too — each catalogue card has a button that records
-the choice and advances the phase. **User Story 2 is complete**, including
-its two behavioural guarantees, both proven against a live model: the three
-seeded prompt-injection listings cause zero deviation, and a search that
-matches nothing is widened *and said so*. The in-chat MCP Apps (booking
-form, mock checkout) are the remaining M4 work: the **booking MCP App server
-and its form bundle now exist and are verified** (M4a Phases A+B), and the
-agent now **opens the form for the car the user picked and records the
-booking it comes back with** (Phases C1–C2 — tools, phase transitions,
-discovery, and the WebSocket bridge that carries the App and its
-`tools/call` both ways) — **and the form now renders in the chat as a real
-MCP App**: a sandboxed iframe, pre-filled from the search record, which
-validates server-side and books without leaving the conversation. That is
-hackathon requirement #3 met end to end. **M4a is complete** — verified end to end against `docker compose up`, in a
-real browser, with a real conversation. M4b (mock checkout) is next.
+**All 5 user stories complete.** M0–M4c delivered:
 
-**328 automated tests**, of which **319 run with no external setup at all**
-(94 `mcp-services` + 214 `agent-backend` + 11 `frontend`); the remaining 9 need a live LLM key
-and/or a running Phoenix and auto-skip without them. The 202 tests that
-existed on 2026-08-08 have been run green together against a live model and a
-running Phoenix. The full live suite was re-run on 2026-08-09 against a
-real model with Phoenix up: **217 passed, 0 skipped**.
-Plus live end-to-end verification against a real Docker Compose build. See
-[`specs/001-ai-car-matchmaker/`](specs/001-ai-car-matchmaker/) for the full
+- **M0–M1**: Scaffolding, foundational (checkpointer, MCP wiring, observability)
+- **M2 (US1)**: Conversational interview — the agent asks questions, extracts structured slots
+- **M3 (US2)**: Research & ranked recommendations — marketplace search, deterministic ranking, A2UI catalogue
+- **M4a (US3)**: In-chat booking — MCP App form, phase transitions, WebSocket bridge
+- **M4b (US4)**: Mock checkout — payment MCP App, Principle III enforcement, synthetic confirmations
+- **M4c (US5)**: Session resume — auto-reconnect, SQLite persistence, concurrent session isolation
+
+**261 automated tests** (agent-backend) + **146** (mcp-services) + **11** (frontend) = **418 total**.
+9 tests skip without a live LLM key or Phoenix; the rest run with no external setup.
+
+LLM provider fallback: when the primary provider (Groq or Vertex AI) hits a
+rate limit or quota error, the agent automatically retries on a configured
+fallback provider — critical for demos where quota is有限.
+
+See [`specs/001-ai-car-matchmaker/`](specs/001-ai-car-matchmaker/) for the full
 spec-driven-development trail:
 
 - [`spec.md`](specs/001-ai-car-matchmaker/spec.md) — user stories, requirements, success criteria
@@ -52,11 +38,12 @@ spec-driven-development trail:
 
 ```
 frontend (React + Vite)          agent-backend (Python)         mcp-services (Python)
- ├─ A2UI renderer (@a2ui/react)  LangChain DeepAgents    ◄──►   marketplace ✅ (live)
- └─ MCP-Apps host (iframes, M4a) LangGraph +                    booking (live) / payment (M4b)
-        │                        AsyncSqliteSaver               MCP over Streamable HTTP
-        │ WebSocket                     │
+ ├─ A2UI renderer (@a2ui/react)  LangChain DeepAgents    ◄──►   marketplace ✅
+ └─ MCP-Apps host (iframes)      LangGraph +                    booking ✅
+        │                        AsyncSqliteSaver               payment ✅
+        │ WebSocket                     │                       MCP over Streamable HTTP
         └──────────────────►    Arize Phoenix (OTel traces)
+                                LLM Fallback (Groq ↔ Vertex AI)
 ```
 
 ## Running locally
@@ -91,18 +78,22 @@ the backend dying at startup.
 | MCP services — marketplace (protocol) | http://localhost:8100/mcp |
 | MCP services — booking (health) | http://localhost:8100/booking/health |
 | MCP services — booking (protocol) | http://localhost:8100/booking/mcp |
+| MCP services — payment (health) | http://localhost:8100/payment/health |
+| MCP services — payment (protocol) | http://localhost:8100/payment/mcp |
 | Phoenix (traces UI) | http://localhost:16006 |
 
-`mcp-services` runs **two** MCP servers over Streamable HTTP in one process:
+`mcp-services` runs **three** MCP servers over Streamable HTTP in one process:
 **marketplace** at `/mcp` (`search_listings`, `get_listing_details` over the
-203-listing mock dataset) and **booking** at `/booking/mcp`
+203-listing mock dataset), **booking** at `/booking/mcp`
 (`open_booking_form`, `submit_booking`, plus the `ui://booking/form.html`
-MCP App resource). The payment server lands in M4b. The agent discovers
-**both** servers at startup, so `agent-backend`'s `/health` reports
-`mcp_connected` (marketplace) and `booking_connected` alongside
-`llm_configured` — `status` is `degraded` if any is missing. Discovery is
-fail-soft in both directions: an unreachable booking server degrades the
-booking step rather than stopping the backend.
+MCP App resource), and **payment** at `/payment/mcp`
+(`open_mock_checkout`, `confirm_mock_payment`, plus the
+`ui://payment/checkout.html` MCP App resource). The agent discovers all
+three servers at startup, so `agent-backend`'s `/health` reports
+`mcp_connected` (marketplace), `booking_connected`, and `payment_connected`
+alongside `llm_configured` — `status` is `degraded` if any is missing.
+Discovery is fail-soft in both directions: an unreachable server degrades
+that step rather than stopping the backend.
 
 `submit_booking` is deliberately **not** exposed to the model in any phase.
 It takes free-form form values, so a model-callable version could invent
@@ -167,6 +158,20 @@ The build also still refuses to install a bundle that references external
 assets (a sandboxed, opaque-origin iframe cannot load them) or that is
 missing the MCP Apps handshake.
 
+### Rebuilding the checkout form (MCP App)
+
+`mcp-services/payment/static/checkout.html` is a **committed build artifact**
+from `mcp-apps-ui/checkout/`. After editing anything under
+`mcp-apps-ui/checkout/src/`:
+
+```bash
+(cd mcp-apps-ui/checkout && npm install && npm run build)
+```
+
+The build writes `checkout.html` **and** `checkout.build.json`. Commit both.
+The checkout bundle carries card inputs (for Principle III testing) but
+**never sends them** — `confirm_mock_payment` is called with no arguments.
+
 The gate itself is on key *presence*, but an out-of-quota key no longer
 reads as a bug: a provider 429 that names a quota is routed through
 `skip_if_quota_exhausted`, so those tests **skip** with the provider's own
@@ -176,9 +181,9 @@ still re-raises.
 ## Tech stack
 
 - **Agent harness**: [LangChain DeepAgents](https://docs.langchain.com/labs/deep-agents/overview) (LangGraph)
-- **LLM provider**: config, not code. `LLM_PROVIDER=google` uses [Google Gemini](https://ai.google.dev/) via the native `langchain-google-genai` client (default `gemini-3.6-flash`); `LLM_PROVIDER=openai_compatible` uses any OpenAI-compatible API. Development runs on [Groq](https://groq.com/) (`openai/gpt-oss-120b`), keeping the scarce Gemini quota for demo rehearsal. Groq's free tier is generous on request count but capped at **200,000 tokens/day** — roughly 66 agent turns here, since the DeepAgents harness binds ~2,700 tokens of tool schemas into every request
-- **Tool protocol**: [MCP](https://modelcontextprotocol.io/) (Python SDK, Streamable HTTP) — marketplace **and** booking servers live at `/mcp` and `/booking/mcp`; payment in M4b
-- **In-chat transactional UI**: [MCP Apps](https://apps.extensions.modelcontextprotocol.io/) (`@modelcontextprotocol/ext-apps` 1.7.5) — the booking form is built, served as a `ui://` resource and **rendered in the chat** (M4a, complete); the mock checkout is M4b, in progress
+- **LLM provider**: config, not code. `LLM_PROVIDER=google` uses [Google Gemini](https://ai.google.dev/) via the native `langchain-google-genai` client (default `gemini-3.6-flash`); `LLM_PROVIDER=openai_compatible` uses any OpenAI-compatible API. Development runs on [Groq](https://groq.com/) (`openai/gpt-oss-120b`). **Fallback**: configure `LLM_FALLBACK_PROVIDER` to automatically retry on rate limits (429) or quota errors (403) — e.g., primary Groq, fallback Vertex AI
+- **Tool protocol**: [MCP](https://modelcontextprotocol.io/) (Python SDK, Streamable HTTP) — marketplace, booking, and payment servers
+- **In-chat transactional UI**: [MCP Apps](https://apps.extensions.modelcontextprotocol.io/) (`@modelcontextprotocol/ext-apps`) — booking form and mock checkout, both rendered in the chat
 - **Generative UI**: [A2UI](https://a2ui.org/) v0.9 protocol via the real [`@a2ui/react`](https://www.npmjs.com/package/@a2ui/react) renderer — car catalogue + live agent progress/reasoning
 - **Observability**: [Arize Phoenix](https://arize.com/docs/phoenix) via OpenTelemetry
 - **Spec process**: [spec-kit](https://github.com/github/spec-kit)

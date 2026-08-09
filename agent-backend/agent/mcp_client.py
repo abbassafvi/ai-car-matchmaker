@@ -99,6 +99,69 @@ async def discover_booking_tools(url: str | None = None) -> list:
     return await _discover("booking", endpoint, EXPECTED_BOOKING_TOOLS)
 
 
+FORM_RESOURCE_URI = "ui://booking/form.html"
+
+
+async def read_form_resource(uri: str = FORM_RESOURCE_URI, url: str | None = None) -> dict[str, Any]:
+    """Fetch the booking MCP App's `ui://` resource, **keeping its `_meta`**.
+
+    Deliberately not `MultiServerMCPClient.get_resources()`, which is the
+    obvious call and the wrong one. Measured against the live server: the
+    adapter converts each content part to a LangChain `Blob` carrying only
+    `mimetype` and `metadata={"uri": ...}`, and **drops `_meta` entirely**.
+    The resource's `_meta` is where the deny-by-default CSP lives --
+
+        {"ui": {"csp": {"connectDomains": [], "resourceDomains": []},
+                "permissions": {}}}
+
+    -- which is spec.md US3 AS1's actual requirement and the whole reason
+    `booking/server.py` declares it on the resource rather than the tool.
+    It does survive the wire: `read_resource()`'s `contents[0].meta` has it.
+    So this drops to a raw `ClientSession` for one call.
+
+    Nothing would have failed if we had used the adapter. The form carries
+    its own `default-src 'none'` meta tag and Phase D sandboxes the iframe,
+    so the document stays locked down either way -- US3 AS1 would just have
+    quietly stopped being a property of the protocol and become two
+    hardcodings that happen to agree, with the host inventing a policy the
+    server had already stated. That is the failure this project keeps
+    paying for, so: read the declaration, ship the declaration.
+
+    Raises rather than returning a partial result. Unlike tool discovery
+    there is no degraded mode worth having -- an MCP App with no document
+    is not an MCP App, and the caller (the form-open path) can report it.
+    """
+    from mcp import ClientSession
+    from mcp.client.streamable_http import streamablehttp_client
+
+    endpoint = url or os.environ.get("MCP_BOOKING_URL", DEFAULT_BOOKING_URL)
+
+    async with streamablehttp_client(endpoint) as (read, write, _):
+        async with ClientSession(read, write) as session:
+            await session.initialize()
+            result = await session.read_resource(uri)
+
+    if not result.contents:
+        raise RuntimeError(f"{uri} returned no contents")
+
+    content = result.contents[0]
+    html = getattr(content, "text", None)
+    if not html:
+        raise RuntimeError(
+            f"{uri} returned no text -- an MCP App resource must be an HTML "
+            f"document, got {type(content).__name__}"
+        )
+
+    return {
+        "uri": uri,
+        "mimeType": content.mimeType,
+        "html": html,
+        # The host needs this to build the iframe's sandbox/CSP. `meta` is
+        # `_meta` on the wire; the SDK exposes it under this name.
+        "meta": getattr(content, "meta", None) or {},
+    }
+
+
 async def call_structured(tool, args: dict[str, Any]) -> dict[str, Any]:
     """Invoke an adapted MCP tool and return its `structured_content`.
 

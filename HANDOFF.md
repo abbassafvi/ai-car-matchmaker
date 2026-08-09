@@ -113,9 +113,12 @@ M4a  🟡 IN PROGRESS — Booking form MCP App (User Story 3)
                    open_booking_form, refine_search, booking discovery,
                    phase spans, bundle staleness guard. 22/22 live checks
                    against the real two-server process
-       ⬜ Phase C2 the {"type":"mcp_app"} WS envelope + reverse channel +
-                   code-driven kickoff — START HERE (§10)
+       ✅ Phase C2 the {"type":"mcp_app"} envelope (resource + toolInput +
+                   toolResult), the app_tool_call reverse channel, the
+                   code-driven kickoff, the CSP-preserving resource read,
+                   and the phase line. 17/17 live over a real WebSocket
        ⬜ Phase D  T034 frontend iframe host (AppBridge), then click it
+                   — START HERE (§10)
        ⬜ Phase E  full-stack verify, docs, push
 M4b  ⬜ Mock checkout MCP App (User Story 4)
 M4c  ⬜ Session resume (User Story 5)
@@ -124,7 +127,7 @@ M6   ⬜ Hardening, E2E tests, README finalization
        ⏸️ deck (#13) + demo video (#14) — LAST, and the user's to own
 ```
 
-**Test suite: 290 total** (measured 2026-08-09 after M4a Phase C1, not copied
+**Test suite: 311 total** (measured 2026-08-09 after M4a Phase C1, not copied
 forward — `pytest tests/ -q` in each service).
 
 ⚠️ **The Phase C1 commit message says "278 pass with no external setup". It
@@ -137,10 +140,10 @@ counts with nothing else running.**
 
 | Suite | Tests | Gated | Files |
 |---|---|---|---|
-| `mcp-services` | **93** | 0 | `test_generate_listings` (8), `test_marketplace` (22), `test_marketplace_server` (9), `test_booking` (**26**), `test_booking_server` (**28**) |
-| `agent-backend` | **197** | 9 | 23 modules, see §7 |
+| `mcp-services` | **94** | 0 | `test_generate_listings` (8), `test_marketplace` (22), `test_marketplace_server` (9), `test_booking` (**26**), `test_booking_server` (**28**) |
+| `agent-backend` | **217** | 9 | 24 modules, see §7 |
 
-- **281 pass with no external setup** (93 + 188)
+- **303 pass with no external setup** (94 + 209)
 - ⚠️ **The live sweep has NOT been re-run since 2026-08-08.** On that date
   all 202 then-existing tests passed together with a live key and Phoenix
   running (`agent-backend` **163 passed, 0 skipped**, `mcp-services` 39),
@@ -619,8 +622,8 @@ docker compose up --build
 
 # Tests (run the FULL suite together, never file-by-file — see §8.31)
 source .venv/bin/activate
-(cd mcp-services  && python -m pytest tests/ -q)   # 93 pass, no setup needed
-(cd agent-backend && python -m pytest tests/ -q)   # 188 pass, 9 skip (no key)
+(cd mcp-services  && python -m pytest tests/ -q)   # 94 pass, no setup needed
+(cd agent-backend && python -m pytest tests/ -q)   # 209 pass, 9 skip (no key)
 # Bare `pytest tests/` also works now. It did NOT before the Phase C
 # audit -- both suites died at collection, and only `python -m pytest`
 # worked, because it puts the cwd on sys.path. Fixed with a conftest.py
@@ -629,7 +632,7 @@ source .venv/bin/activate
 # With live LLM (see §5) and Phoenix:
 docker compose up -d phoenix
 set -a && . agent-backend/.env && set +a
-(cd agent-backend && python -m pytest tests/ -q)   # expect 197 pass, 0 skip
+(cd agent-backend && python -m pytest tests/ -q)   # expect 217 pass, 0 skip
                                                    # (INFERRED: last measured
                                                    #  2026-08-08 at 163/0; the
                                                    #  82 tests added since are
@@ -1082,68 +1085,48 @@ availability, accepting a valid one and dropping a `card_number` at the
 allowlist; the AWAITING_PAYMENT transition; and `/health` reporting
 `booking_connected: true` (and `degraded` with the server down).
 
-### Immediate next: M4a **Phase C2** — the wire
+### What Phase C2 shipped (2026-08-09)
 
-**Milestone order from here**: M4a → M4b → M4c → M5 (evals) → M6
-(hardening). The deck and video sit *after* all of that and are the user's
-to own — see the priority decision in §1.
+| Produced by Phase C2 | Where |
+|---|---|
+| `read_form_resource()` — a raw `ClientSession.read_resource`, so the resource's `_meta` (the CSP) survives. The adapter drops it | `agent/mcp_client.py` |
+| The `{"type":"mcp_app"}` envelope: resource + **`toolInput`** + `toolResult`. `toolInput.arguments` carries the *projected* listing | `api/main.py::build_booking_app_envelope` |
+| `_BookingFormStream` — per-connection "have I shown this yet", keyed on both the selected listing and `booking_form_requests` | `api/main.py` |
+| The `app_tool_call` / `app_tool_result` reverse channel, allowlisted to `submit_booking` in FORM_FILLING, substituting `listing_id` and `available_from` from persisted state | `api/main.py::_handle_app_tool_call` |
+| The phase line (§14 rec 5 — the last audit item) | `agent/prompts.py::phase_context_line` |
+| 21 + 1 new tests | `tests/test_booking_app_wire.py`, `mcp-services/tests/test_booking_server.py` |
 
-**C2's scope** (backend only, still **no LLM spend needed**):
+**Verified live, 17/17**, over a real WebSocket to the real backend and
+real mcp-services: a click opens the form by itself; the CSP arrives intact;
+an incomplete submit is rejected with all three fields named and no
+confirmation; a tampered `available_from` is ignored and the record's
+enforced; an iframe claiming `LST-9999` books the session's car anyway; a
+`card_number` is dropped at the allowlist; a replay is refused; a
+non-allowlisted tool is refused; and a reconnect after submitting does
+**not** reopen the form.
 
-1. **Read the `ui://` resource so the CSP survives.** 🔴 Measured in Phase
-   C1 and not yet acted on: `MultiServerMCPClient.get_resources()` converts
-   contents to a LangChain `Blob` with `metadata={"uri": ...}` and **drops
-   `_meta` entirely**. The CSP *does* survive the wire — `read_resource()`'s
-   `contents[0].meta` carries
-   `{"ui": {"csp": {"connectDomains": [], "resourceDomains": []}, ...}}` —
-   so use a raw `ClientSession.read_resource()`, not the adapter. Going
-   through `get_resources()` silently discards the deny-by-default
-   declaration spec.md US3 AS1 requires, and nothing fails: the form stays
-   locked down by its own `<meta>` tag, so US3 AS1 quietly degrades from a
-   protocol property to two hardcodings that happen to agree. Assert the
-   CSP **over the wire**, not against `FORM_RESOURCE_META` — the existing
-   test does the latter.
-2. **The outbound envelope.** `{"type": "mcp_app", ...}` carrying the
-   resource (uri, mimeType, html, meta) **and both** `toolInput` and
-   `toolResult`. Both, because ext-apps 1.7.5 states `sendToolInput` "is
-   sent exactly once and is **required before** `sendToolResult`".
-   ⚠️ `toolInput.arguments` for `open_booking_form` is *the listing record*
-   — send the **projected** one. `LISTING_DISPLAY_FIELDS` strips
-   `description` from the tool's **result**, not from its arguments, so
-   echoing the raw arguments would put attacker-controlled prose inside the
-   App document and defeat the server-side allowlist.
-3. **The reverse channel.** `{"type": "app_tool_call", call_id, name,
-   arguments}` → allowlisted to `submit_booking` in FORM_FILLING only (this
-   is the App-bridge gate, a different gate from the model's) → **substitute
-   `listing_id` and `available_from` from `selected_listing()`**, ignoring
-   the iframe's, → call the MCP tool → on `ok`, build a `Booking` and call
-   `SessionState.submit_booking()` → `_persist_session` → reply
-   `{"type": "app_tool_result", call_id, result}`.
-4. **Code-driven kickoff**, the `_run_research_turn` shape: on entering
-   FORM_FILLING from either route, when `booking_form_requests` exceeds
-   what this connection has sent, and on reconnect while in FORM_FILLING
-   (US5). `SessionState.booking_form_requests` exists for exactly this —
-   a tool inside a graph run cannot push to a WebSocket.
-5. **§14 recommendation 5** — the one audit item deliberately left: a
-   per-turn phase line in the model's context (`Phase: FORM_FILLING.
-   Selected: LST-0042. Form open, not submitted.`). Held back from C1
-   because it is a prompt change and C1 spent no LLM budget; §3 lesson 14
-   says prompt defects are ordering defects and are invisible until a real
-   turn runs. Do it where a live pass is happening anyway.
-6. T031's iframe half (Phase D), and a live pass over the three prompts C1
-   changed but never ran.
+### Immediate next: M4a **Phase D** — the browser host
 
-Still true and still load-bearing:
+Everything below the browser is done. What is missing is
+`frontend/src/mcp-app-host/`, which is currently an empty directory.
 
-- **Pre-fill from `SessionState.selected_listing()`** — the verbatim record,
-  never model prose (Principle I). C1's `open_booking_form` already does
-  this; C2 must not reintroduce a browser-supplied copy.
-- **MCP Apps render HTML in a sandboxed iframe** — a different surface from
-  A2UI, deliberately (§1's resolved ambiguity). The A2UI catalogue stays the
-  catalogue; the booking form is the iframe.
-- **Do not demo past the selection yet.** FORM_FILLING now has tools and a
-  prompt, but nothing appears on screen until Phase D.
-- **Budget the LLM quota first** (§5). 200k tokens/day, ~66 agent turns.
+1. **Render the iframe in the chat column** (decided 2026-08-08), `srcdoc`
+   from `resource.html`, `sandbox="allow-scripts"` and **no**
+   `allow-same-origin` — the opaque origin is why the bundle had to be
+   self-contained. Apply `resource.meta.ui.csp` rather than inventing a
+   policy; it is on the wire now precisely so the host does not have to.
+2. **`new AppBridge(null, hostInfo, caps)`** and set `bridge.oncalltool` to
+   forward as `{"type":"app_tool_call", call_id, name, arguments}` and
+   resolve on the matching `app_tool_result`. `AppBridge` takes a **null**
+   MCP client and `oncalltool` is a **public setter** — verified by reading
+   the 1.7.5 bundle; that is what lets the host intercept instead of
+   needing an MCP client in the browser.
+3. **Order matters**: `oninitialized` → `sendToolInput(envelope.toolInput)`
+   → `sendToolResult(envelope.toolResult)`. ext-apps states the input
+   notification is required before the result; skip it and the View waits
+   forever with an empty form.
+4. Then **click the actual form** (§3 lesson 9), and re-run the live prompt
+   pass the three C1 prompts still owe (§2).
 
 **Phase D** is then `frontend/src/mcp-app-host/`: a `srcdoc` iframe with
 `sandbox="allow-scripts"` (no `allow-same-origin`), `new AppBridge(null,

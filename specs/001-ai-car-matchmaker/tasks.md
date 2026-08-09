@@ -1014,9 +1014,8 @@ MCP App WebSocket envelope) and D (the browser host) remain.**
       intercepts the App's `tools/call` and tunnels it over the existing
       WebSocket — no MCP client in the browser. Verified by reading the
       1.7.5 bundle. The iframe renders **in the chat column**.
-- [ ] T035 [US3] FORM_FILLING wiring, AWAITING_PAYMENT transition on valid
-      submission. **State half DONE (Phase C1); the WebSocket envelope and
-      the code-driven kickoff are C2.**
+- [x] T035 [US3] FORM_FILLING wiring, AWAITING_PAYMENT transition on valid
+      submission. **DONE — state half in Phase C1, wire in Phase C2.**
 
       `SessionState.submit_booking()` exists and is the transition, beside
       the other four in `state.py` (Principle II). It refuses three things
@@ -1032,6 +1031,18 @@ MCP App WebSocket envelope) and D (the browser host) remain.**
       stops FORM_FILLING being a one-way door (§14 finding 5) and what
       makes spec.md's "the prior in-progress booking is discarded, not
       silently merged" true (finding 3).
+
+      **Phase C2** added the wire: the `{"type":"mcp_app"}` envelope
+      (resource + `toolInput` + `toolResult` — ext-apps requires the input
+      notification *before* the result), the `app_tool_call` reverse
+      channel, and the code-driven kickoff. The bridge is a **second gate**
+      with a different subject from `TOOLS_BY_PHASE`: that one says what
+      the model may call, this says what the *iframe* may, and the iframe
+      is a browser. Tool name, phase, `listing_id` and `available_from` are
+      all decided from persisted state, none taken from the message.
+      Verified live over a real WebSocket: an iframe claiming `LST-9999`
+      books the session's car, a tampered `available_from` is ignored, a
+      replay is refused, a non-allowlisted tool is refused.
 
       Also landed here, since every transition was being touched anyway:
       each one now emits an **OTel span** naming the trigger. Principle V

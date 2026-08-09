@@ -147,3 +147,42 @@ PHASE_SYSTEM_PROMPTS: dict[Phase, str] = {
     Phase.AWAITING_PAYMENT: TRANSACTION_SYSTEM_PROMPT,
     Phase.CONFIRMED: CONFIRMED_SYSTEM_PROMPT,
 }
+
+
+def phase_context_line(session: dict) -> str:
+    """One line of current state, prepended to each turn's user message.
+
+    §14 recommendation 5. The system prompt is fixed per phase and says
+    what the *phase* means; it cannot say which car this user picked or
+    whether their form is still open. Without that the model has to infer
+    it from the conversation, and after a re-selection the conversation
+    contains two cars.
+
+    Deliberately values, not instructions -- the instructions are already
+    in the system prompt, and §3 lesson 14 ("the last instruction wins")
+    warns that a per-turn line arriving *after* the system prompt is the
+    strongest position in the context. Putting a rule here would silently
+    outrank the phase prompt. So this states facts and tells the model
+    nothing to do.
+
+    ~20 tokens against DeepAgents' fixed ~2,700-token tool-schema tax
+    (§8.12), so the cost is noise. It is built from persisted state, never
+    from prose, so nothing it asserts can be a hallucination.
+    """
+    parts = [f"Phase: {session.get('phase')}"]
+
+    selected = session.get("selected_listing_id")
+    if selected:
+        parts.append(f"Selected listing: {selected}")
+
+    booking = session.get("booking") or {}
+    if booking.get("status") == "SUBMITTED":
+        parts.append(f"Booking {booking.get('id')} submitted")
+    elif session.get("phase") == "FORM_FILLING":
+        parts.append("Booking form open, not yet submitted")
+
+    slate = session.get("candidate_listings") or []
+    if slate and not selected:
+        parts.append(f"{len(slate)} listings on screen")
+
+    return "[Session state: " + ". ".join(parts) + ".]"

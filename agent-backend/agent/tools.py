@@ -131,6 +131,13 @@ def select_listing(
 
 OPEN_BOOKING_FORM_TOOL = "open_booking_form"
 
+# Named here beside its sibling, but deliberately never wrapped and never
+# bound: `submit_booking` is not a model tool in any phase. The name exists
+# so `api/main.py`'s MCP App bridge -- the only caller -- does not spell it
+# as a string literal, and so a reader of this module sees both halves of
+# the booking server and the asymmetry between them.
+SUBMIT_BOOKING_TOOL = "submit_booking"
+
 
 def build_booking_tools(booking_mcp_tools: list) -> list:
     """Model-facing booking tools, closed over the discovered MCP tools.

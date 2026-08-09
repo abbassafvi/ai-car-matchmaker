@@ -54,8 +54,10 @@ load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 from agent.graph import PhaseAgentRegistry  # noqa: E402
 from agent.llm import is_configured  # noqa: E402
 from agent.mcp_client import (  # noqa: E402
+    call_structured,
     discover_booking_tools,
     discover_marketplace_tools,
+    read_form_resource,
 )
 from agent.render_a2ui import (  # noqa: E402
     CATALOGUE_SURFACE_ID,
@@ -69,9 +71,20 @@ from agent.render_a2ui import (  # noqa: E402
     build_reasoning_surface_init,
     build_reasoning_surface_update,
 )
+from agent.prompts import phase_context_line  # noqa: E402
 from agent.research import SEARCH_TOOL, narration_brief, run_research  # noqa: E402
-from agent.state import InterviewState, Phase, RankedRecommendation, SessionState  # noqa: E402
-from agent.tools import OPEN_BOOKING_FORM_TOOL, build_runtime_tools  # noqa: E402
+from agent.state import (  # noqa: E402
+    Booking,
+    InterviewState,
+    Phase,
+    RankedRecommendation,
+    SessionState,
+)
+from agent.tools import (  # noqa: E402
+    OPEN_BOOKING_FORM_TOOL,
+    SUBMIT_BOOKING_TOOL,
+    build_runtime_tools,
+)
 from observability.otel_setup import setup_observability  # noqa: E402
 
 log = logging.getLogger(__name__)
@@ -289,6 +302,127 @@ async def _refresh_refined_surfaces(
     await _send_catalogue(surfaces, session)
 
 
+class _BookingFormStream:
+    """Per-connection bookkeeping for the booking MCP App, mirroring
+    `_SurfaceStream`'s role and existing for the same reason: what the
+    browser has already been shown is a property of the *connection*, not
+    of the session. A reconnecting browser has no iframe, however old the
+    session it is resuming (US5).
+
+    Deciding when to push is not "has the phase changed". Three different
+    things must open the form, and one must not:
+
+    - the user **clicks** a card, so `_handle_action` advances the phase;
+    - the model calls `open_booking_form` ("show me the form again"),
+      which cannot push anything itself -- it runs inside a graph and knows
+      nothing about this socket, so it bumps
+      `SessionState.booking_form_requests` and this notices;
+    - the browser **reconnects** mid-booking and needs the iframe back;
+    - but a submitted booking must **not** reopen the form, or a resumed
+      AWAITING_PAYMENT session would land back on a form it has finished.
+
+    Tracking the selected listing id as well as the counter is what makes
+    re-selection work: picking a different car has to re-open the form on
+    the new one, and that changes no counter.
+    """
+
+    def __init__(self, websocket: WebSocket):
+        self._websocket = websocket
+        self._shown_for: str | None = None
+        self._requests_seen = 0
+
+    def _should_send(self, session: dict) -> bool:
+        if Phase(session["phase"]) != Phase.FORM_FILLING:
+            return False
+        if not session.get("selected_listing_id"):
+            return False
+        booking = session.get("booking") or {}
+        if booking.get("status") == "SUBMITTED":
+            return False
+        return (
+            session["selected_listing_id"] != self._shown_for
+            or (session.get("booking_form_requests") or 0) > self._requests_seen
+        )
+
+    async def maybe_open(self, booking_tools: list, session: dict) -> None:
+        """Push the MCP App envelope if this connection still owes one.
+
+        Fail-soft, like every other downstream call: mcp-services being
+        unreachable must leave the chat usable and the session intact, not
+        take the turn down. The user is told, because an iframe that
+        silently never appears is the worst version of this.
+        """
+        if not self._should_send(session):
+            return
+        try:
+            envelope = await build_booking_app_envelope(booking_tools, session)
+        except Exception:
+            log.exception("Could not open the booking form for %s", session["session_id"])
+            await self._websocket.send_json({
+                "type": "error",
+                "message": "I couldn't open the booking form. Please try again.",
+            })
+            return
+
+        await self._websocket.send_json(envelope)
+        self._shown_for = session["selected_listing_id"]
+        self._requests_seen = session.get("booking_form_requests") or 0
+
+
+def _booking_tool(booking_tools: list, name: str):
+    tool = next((t for t in booking_tools or [] if t.name == name), None)
+    if tool is None:
+        raise RuntimeError(
+            f"the booking MCP server did not provide {name!r} -- check "
+            f"/health's booking_connected and MCP_BOOKING_URL"
+        )
+    return tool
+
+
+async def build_booking_app_envelope(booking_tools: list, session: dict) -> dict:
+    """The `mcp_app` message: everything the host needs to render the App.
+
+    Three parts, and all three are required by the MCP Apps protocol rather
+    than by us:
+
+    - **`resource`** — the `ui://` document *and its `_meta`*, which is
+      where the deny-by-default CSP lives (spec.md US3 AS1). Read through
+      `read_form_resource`, not the LangChain adapter, which drops `_meta`.
+    - **`toolInput`** — ext-apps 1.7.5 states `sendToolInput` "is sent
+      exactly once and is **required before** `sendToolResult`", so a host
+      that only forwards the result leaves the View waiting forever.
+    - **`toolResult`** — what `ontoolresult` in the App actually renders.
+
+    ⚠️ **`toolInput.arguments` carries the server's projection, not the
+    record we called with.** The real argument to `open_booking_form` is
+    the verbatim listing, and that includes `description` -- the one
+    attacker-controlled field, delimited with `<untrusted_listing_data>`.
+    `LISTING_DISPLAY_FIELDS` strips it from the tool's *result*; nothing
+    strips it from its *arguments*. Echoing the real arguments would carry
+    third-party prose into the App document and defeat the server-side
+    allowlist entirely (Principle IV). So the input we report is the
+    projection the result already contains: still honest about what the
+    tool was asked to do, minus the field the form must never see.
+    """
+    listing = SessionState.model_validate(session).selected_listing()
+    if listing is None:
+        raise RuntimeError("no listing is selected, so there is no form to open")
+
+    payload = await call_structured(
+        _booking_tool(booking_tools, OPEN_BOOKING_FORM_TOOL), {"listing": listing},
+    )
+    resource = await read_form_resource(payload["resourceUri"])
+
+    return {
+        "type": "mcp_app",
+        "app": "booking",
+        "toolName": OPEN_BOOKING_FORM_TOOL,
+        "resource": resource,
+        "toolInput": {"arguments": {"listing": payload["listing"]}},
+        "toolResult": {"structuredContent": payload},
+    }
+
+
 async def _persist_session(agents, config, session: dict) -> None:
     """Write `session` into the checkpointer without running the agent.
 
@@ -386,6 +520,129 @@ async def _handle_action(
     return session
 
 
+async def _handle_app_tool_call(
+    websocket: WebSocket, incoming: dict, session: dict, booking_tools: list,
+    agents=None, config=None,
+) -> dict:
+    """The MCP App bridge: the iframe's `tools/call`, tunnelled over our WS.
+
+    This is the *only* way `submit_booking` is reachable. It is bound to no
+    phase and no agent (decided 2026-08-09), because its `fields` argument
+    is free-form: a model-callable version could fabricate the user's name
+    and email into a booking they never made. Here the values come from the
+    form the user typed into.
+
+    That makes this a second gate, with a different subject. The phase gate
+    decides what the *model* may call; this decides what the *iframe* may
+    call, and the iframe is untrusted input in exactly the way a browser
+    always is. Three things are therefore not taken from the message:
+
+    - **which tool.** An allowlist of one. A host bug -- or a compromised
+      App -- must not be able to reach `open_booking_form`, let alone
+      anything the marketplace exposes.
+    - **which phase.** Principle II applies to this route too, or the App
+      bridge becomes the phase-skip that `TOOLS_BY_PHASE` exists to
+      prevent.
+    - **which listing.** The App sends `listing_id` because ext-apps has
+      it, and it is ignored in favour of `selected_listing_id`. Taking the
+      browser's word for which car is being booked would put a value the
+      user never chose into a persisted record.
+
+    `available_from` is likewise supplied from the persisted record rather
+    than round-tripped through the browser: it is what the pickup-date
+    check validates against, and a tampered value would let a booking be
+    made for a car before it exists.
+    """
+    call_id = incoming.get("call_id")
+
+    async def reply(result: dict) -> None:
+        await websocket.send_json({
+            "type": "app_tool_result", "call_id": call_id, "result": result,
+        })
+
+    if incoming.get("name") != SUBMIT_BOOKING_TOOL:
+        log.warning("Refused app tool call %r from the booking App", incoming.get("name"))
+        await reply({"structuredContent": {
+            "ok": False,
+            "errors": {"_": "That action is not available from this form."},
+        }})
+        return session
+
+    state = SessionState.model_validate(session)
+    listing = state.selected_listing()
+    if state.phase != Phase.FORM_FILLING or listing is None:
+        log.warning("Refused a booking submit in phase %s", state.phase)
+        await reply({"structuredContent": {
+            "ok": False,
+            "errors": {"_": "This booking can no longer be submitted. "
+                            "Pick a car again to start over."},
+        }})
+        return session
+
+    fields = (incoming.get("arguments") or {}).get("fields") or {}
+    try:
+        result = await call_structured(
+            _booking_tool(booking_tools, SUBMIT_BOOKING_TOOL),
+            {
+                "listing_id": state.selected_listing_id,
+                "fields": fields,
+                "available_from": listing.get("availability_date"),
+            },
+        )
+    except Exception:
+        log.exception("submit_booking failed for session %s", session["session_id"])
+        await reply({"structuredContent": {
+            "ok": False,
+            "errors": {"_": "The booking service is unavailable. Please try again."},
+        }})
+        return session
+
+    if not result.get("ok"):
+        # Field-level validation failures are the *expected* path, not an
+        # error: they go straight back to the iframe, which re-renders them
+        # against the values still held in its own `entered` map so nothing
+        # the user typed is lost (spec.md US3 AS2).
+        await reply({"structuredContent": result})
+        return session
+
+    record = result["booking"]
+    try:
+        state.submit_booking(Booking(
+            id=record["id"],
+            listing_id=state.selected_listing_id,
+            session_id=state.session_id,
+            submitted_form_fields=record["submitted_form_fields"],
+            status="SUBMITTED",
+        ))
+    except ValueError as exc:
+        # Duplicate submit, or a booking that no longer matches the
+        # selection. The server has already minted an id, but nothing is
+        # persisted, so this is a rejected write rather than a partial one.
+        log.warning("Refused to record booking %s: %s", record["id"], exc)
+        await reply({"structuredContent": {
+            "ok": False, "errors": {"_": "This booking has already been submitted."},
+        }})
+        return session
+
+    session = state.model_dump(mode="json")
+    await _persist_session(agents, config, session)
+    await reply({"structuredContent": result})
+
+    # Deterministic, not a model turn: it restates the booking reference and
+    # the car from records, and spending an LLM round trip to say "got it"
+    # would add latency and a hallucination surface (the same call
+    # `_handle_action` makes).
+    await websocket.send_json({
+        "type": "chat", "role": "assistant",
+        "content": (
+            f"Your booking for the {listing.get('year')} {listing.get('brand')} "
+            f"{listing.get('model')} is submitted — reference {record['id']}. "
+            "Payment is the next step."
+        ),
+    })
+    return session
+
+
 async def _run_research_turn(
     websocket: WebSocket, agents, session: dict, config, surfaces: _SurfaceStream
 ) -> dict:
@@ -471,6 +728,8 @@ async def chat_ws(websocket: WebSocket, session_id: str):
 
     session = await _load_session(agents, config, session_id)
     surfaces = _SurfaceStream(websocket)
+    booking_tools = websocket.app.state.booking_tools
+    booking_form = _BookingFormStream(websocket)
 
     # The initial push is inside the same `try` as the message loop, not
     # before it. A browser reload closes the old socket while the backend
@@ -502,6 +761,12 @@ async def chat_ws(websocket: WebSocket, session_id: str):
         if session.get("recommendations"):
             await _send_catalogue(surfaces, session)
 
+        # And a session resumed mid-booking gets its form back, for the
+        # same reason and from the same persisted record (US5). Without
+        # this a reconnect in FORM_FILLING shows a catalogue with a card
+        # marked selected and no way to proceed.
+        await booking_form.maybe_open(booking_tools, session)
+
         while True:
             incoming = await websocket.receive_json()
 
@@ -509,6 +774,26 @@ async def chat_ws(websocket: WebSocket, session_id: str):
             # need no LLM, so they are handled before the agent-required
             # guard below -- a user can still pick a listing from the
             # catalogue of a resumed session when no key is configured.
+            # The MCP App bridge: the booking iframe's `tools/call`,
+            # tunnelled by the host over this socket. Like an A2UI action
+            # it needs no LLM, so it is handled before the agent guard.
+            if incoming.get("type") == "app_tool_call":
+                try:
+                    session = await _handle_app_tool_call(
+                        websocket, incoming, session, booking_tools, agents, config,
+                    )
+                except Exception:
+                    log.exception("App tool call failed for session %s", session_id)
+                    await websocket.send_json({
+                        "type": "app_tool_result",
+                        "call_id": incoming.get("call_id"),
+                        "result": {"structuredContent": {
+                            "ok": False,
+                            "errors": {"_": "Something went wrong. Please try again."},
+                        }},
+                    })
+                continue
+
             if incoming.get("type") == "action":
                 try:
                     session = await _handle_action(
@@ -529,6 +814,12 @@ async def chat_ws(websocket: WebSocket, session_id: str):
                         "type": "error",
                         "message": "Something went wrong applying that. Please try again.",
                     })
+                # A click is one of the three routes into FORM_FILLING, and
+                # the form is opened in code rather than by asking the model
+                # to decide -- the same shape as the research auto-kickoff,
+                # and for the same reason (Principle II: the state machine
+                # drives, not the LLM).
+                await booking_form.maybe_open(booking_tools, session)
                 continue
 
             if incoming.get("type") != "chat" or not incoming.get("content"):
@@ -577,7 +868,19 @@ async def chat_ws(websocket: WebSocket, session_id: str):
                 # usable at once -- the property T053 established with
                 # asyncio.to_thread, preserved here by different means).
                 result = await agent.ainvoke(
-                    {"messages": [{"role": "user", "content": incoming["content"]}], "session": session},
+                    {
+                        # The phase line rides *with* the user's message
+                        # rather than as a separate message, so the history
+                        # does not accumulate one system turn per exchange
+                        # -- at ~20 tokens each that is small, but it also
+                        # keeps the transcript readable and keeps the state
+                        # attached to the turn it describes.
+                        "messages": [{
+                            "role": "user",
+                            "content": f"{phase_context_line(session)}\n\n{incoming['content']}",
+                        }],
+                        "session": session,
+                    },
                     config,
                 )
             except Exception:
@@ -633,5 +936,14 @@ async def chat_ws(websocket: WebSocket, session_id: str):
                         "type": "error",
                         "message": "I couldn't finish researching listings. Please try again.",
                     })
+
+            # Last, after every model turn: the model may have called
+            # `select_listing` ("I'll take the Jeep") or `open_booking_form`
+            # ("show me the form again"), and neither can push to this
+            # socket from inside a graph run. Checked here rather than
+            # branched on the tool actually called, so the prose path and
+            # the click path converge on one piece of code -- which is the
+            # guarantee §14 finding 5 showed had quietly stopped holding.
+            await booking_form.maybe_open(booking_tools, session)
     except WebSocketDisconnect:
         pass

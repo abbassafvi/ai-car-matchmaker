@@ -24,15 +24,17 @@ seeded prompt-injection listings cause zero deviation, and a search that
 matches nothing is widened *and said so*. The in-chat MCP Apps (booking
 form, mock checkout) are the remaining M4 work: the **booking MCP App server
 and its form bundle now exist and are verified** (M4a Phases A+B), and the
-agent can now **open the form for the car the user picked** (Phase C1 —
-tools, phase transitions, discovery). Rendering that form in the browser is
-the rest of M4a.
+agent now **opens the form for the car the user picked and records the
+booking it comes back with** (Phases C1–C2 — tools, phase transitions,
+discovery, and the WebSocket bridge that carries the App and its
+`tools/call` both ways). Rendering that form in the browser is the rest of
+M4a.
 
-**290 automated tests**, of which **281 run with no external setup at all**
-(93 `mcp-services` + 188 `agent-backend`); the remaining 9 need a live LLM key
+**311 automated tests**, of which **303 run with no external setup at all**
+(94 `mcp-services` + 209 `agent-backend`); the remaining 9 need a live LLM key
 and/or a running Phoenix and auto-skip without them. The 202 tests that
 existed on 2026-08-08 have been run green together against a live model and a
-running Phoenix; the 88 added since need no external setup and none is gated.
+running Phoenix; the 109 added since need no external setup and none is gated.
 Plus live end-to-end verification against a real Docker Compose build. See
 [`specs/001-ai-car-matchmaker/`](specs/001-ai-car-matchmaker/) for the full
 spec-driven-development trail:

@@ -467,3 +467,30 @@ def test_the_default_really_is_what_would_have_returned_421():
         "check before removing it"
     )
     assert status_for(transport_security=BOOKING_TRANSPORT_SECURITY) != 421
+
+
+def test_the_csp_is_actually_served_and_not_just_declared():
+    """The gap Phase C2 found in this file's own coverage.
+
+    `test_the_resource_declares_an_empty_csp_allowlist` asserts against
+    `FORM_RESOURCE_META`, the Python constant -- which proves the value was
+    written down, not that a client ever receives it. That is §3's "a test
+    asserting a prompt contains a rule proves the rule was written" in a
+    new costume, and it matters here because the backend nearly fetched
+    this resource through `MultiServerMCPClient.get_resources()`, which
+    converts contents to a LangChain `Blob` and **drops `_meta` entirely**.
+    Had the CSP silently stopped being served, this file would still have
+    been green.
+
+    So: read it off the protocol surface a host actually reads.
+    """
+    resources = asyncio.run(mcp.list_resources())
+    match = next(r for r in resources if str(r.uri) == FORM_RESOURCE_URI)
+
+    assert match.meta is not None, (
+        "the resource is served without _meta -- a host has no CSP to apply "
+        "and spec.md US3 AS1 is unmet on the wire, however the constant reads"
+    )
+    csp = match.meta["ui"]["csp"]
+    assert csp["connectDomains"] == [] and csp["resourceDomains"] == []
+    assert match.meta["ui"]["permissions"] == {}

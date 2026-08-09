@@ -127,7 +127,7 @@ mock listings
 | II. Explicit Phase Gating | Transactional tools unavailable outside their phase | PASS (since M2.5, completed M3 Phase E) — `TOOLS_BY_PHASE` in `agent/state.py` is the single gate definition and `agent/graph.py` builds one agent per phase from it. **All three phase transitions are now code paths in `SessionState`** (`save_interview_slots`, `record_research`, `select_listing`), none of them a model decision. Phase E closed the last hole: `select_listing` had been *named* by the gate since M2.5 with nothing implementing it, so Principle II's own worked example — `open_booking_form` gated on a listing being selected — had no precondition anything could satisfy. Covered by `test_phase_gate.py`, `test_mcp_wiring.py`, `test_select_listing.py`. **Caveat**: `FORM_FILLING` is now reachable but its tools land in M4a |
 | III. Mock-Only Transactions | No real payment path exists | PENDING, but **now partly enforced ahead of time** (M4a Phase A). The booking form has no payment field at all, and `booking/store.py`'s `FIELDS` is an allowlist that `normalise()` applies *before* validation and persistence, so a card number submitted into a tampered form is discarded at the boundary rather than filtered later. Tests assert both the schema property and the runtime drop. `confirm_mock_payment` and the real enforcement point still land in M4b |
 | IV. Untrusted Data Boundary | Listing/user text never treated as instructions | **PASS on `openai/gpt-oss-120b` (since M3 Phase F)**, with one caveat below. The rule is in every listing-facing prompt, `store.wrap_untrusted()` genuinely emits the delimiters server-side, and **T029 now supplies the behavioural proof**: all three `ADV-*` probes reach the model inside the delimiters and cause zero deviation — no fabricated `$1` price, no unrequested `select_listing` call, no phase advance, no system-prompt or credential disclosure, and the deterministic ranking byte-identical across the model turn. A fourth test asserts the probes do not derail the turn either, since a boundary enforced by refusing to answer is not a win. Run against **both** shipped models: Groq `openai/gpt-oss-120b` and Gemini `gemini-3.6-flash`, clean on each. An injection result is only evidence for the model it ran on, so re-run T029 whenever the model changes. Previously recorded as: PARTIAL (improved in M3 Phase B) — the *rule* is in every listing-facing prompt (`agent/prompts.py`), and the delimiters it refers to are now genuinely emitted: `store.wrap_untrusted()` wraps each `description` server-side, at the tool-output boundary, before it can reach the model. Confirmed live that the `ADV-0001` payload arrives inside the delimiters via `langchain-mcp-adapters`. Still PARTIAL because what remains is the **behavioural** proof — T029 must show the three `ADV-*` probes cause zero deviation. A wrapper the model ignores is not a boundary |
-| V. Full Observability | Every call/transition traced | PASS (since M2.5) — `setup_observability()` is called from the FastAPI lifespan before any agent is built; covered by `test_observability_wiring.py` + `test_otel_setup.py` |
+| V. Full Observability | Every call/transition traced | **PASS since M4a Phase C1 — previously overstated.** LLM calls and tool calls have been traced since M2.5 via `setup_observability(auto_instrument=True)`, which patches LangChain. **Phase transitions were not**, and the row said they were: a grep for `get_tracer`/`start_as_current_span` across production code returned nothing, so every span was a by-product of a graph *run* — while `_handle_action` advances RESULTS_READY → FORM_FILLING through `aupdate_state`, outside any run, and the MCP App bridge will do the same on submit. `SessionState` now emits a `phase.transition` span itself, from beside the mutation rather than from each caller, carrying `phase.from`/`phase.to`/`phase.trigger`. Fail-soft (§8.28). **Verified against a running Phoenix**, not only at the SDK: a four-transition session produced four `phase.transition` spans, each carrying the right `phase.from`/`phase.to`/`phase.trigger`/`session.id` (§3 lesson 4). Covered by `test_phase_spans.py` (the span is real) and `test_booking_state.py` (every transition emits one) — split deliberately, since "the mechanism exists" and "the mechanism is called" are exactly the two things M2.5 found failing independently |
 
 ### Correction (M2.5)
 
@@ -324,6 +324,68 @@ no `execute` implementation, so shell execution is inert.
 `test_phase_gate.py` pins both the exact built-in set and the absence of
 `StateBackend.execute`, so a dependency upgrade that widens the agent's
 reach fails the suite instead of passing unnoticed.
+
+### Correction (M4a Phase C1) — Principle V had never been fully true
+
+Not an audit this time: the eighth correction was found while *fixing* the
+seventh audit's findings, which is worth recording because it is the
+cheapest way any of these has ever been found. Touching all five phase
+transitions to add the two M4a needed made it obvious that the row above
+claimed something no code did.
+
+- **Row V said "every LLM call, tool call, and phase transition emits an
+  OTel span" and had said so since M2.5.** Two thirds of that was real.
+  The third was not: nothing in `agent-backend` emitted a span explicitly,
+  so every span came from `auto_instrument` patching a LangChain *run* —
+  and `_handle_action` advances a phase through `aupdate_state` with no run
+  at all. The catalogue-click path, shipped in Phase E, had been silently
+  untraced ever since, and the MCP App bridge was about to add a second
+  one. Fixed by emitting from inside `SessionState`, next to each
+  transition, rather than at the call sites — the M2.5 lesson applied:
+  a mechanism every caller must remember to invoke is one forgotten call
+  site away from decorative.
+
+Rows I, II and III also strengthened, all through §14's findings:
+
+- **I.** `open_booking_form` is bound to the model with **no arguments at
+  all** (`tool_call_schema` has no properties), so the listing record
+  reaches the booking server from `SessionState.selected_listing()` and
+  cannot be retyped by the model. Grounding at this boundary is now
+  structural, not prompt-enforced. Verified live against the running
+  server: the price and year the form receives are byte-identical to the
+  persisted search record.
+- **II.** `submit_booking` removed from the gate table entirely rather
+  than left named-and-unbound; `select_listing` and `refine_search` added
+  to FORM_FILLING so the phase is reversible by an explicit route instead
+  of only by the UI accident of `_handle_action` running ahead of the gate;
+  raw `search_listings` removed from RESULTS_READY, because a search that
+  cannot update the slate produces recommendations `select_listing` then
+  refuses.
+- **III.** Verified live rather than only in unit tests: a `card_number`
+  submitted through the real MCP `submit_booking` is dropped by
+  `store.normalise`'s allowlist and never appears in the returned booking.
+
+And one defect found not by reading anything but by bringing the stack up:
+**the booking MCP server had never been reachable from another container.**
+FastMCP enables DNS-rebinding protection by default and answers `421` to any
+`Host` outside `localhost`, so every MCP call the backend made to
+`http://mcp-services:8100/booking/mcp` was rejected — while
+`GET /booking/health` answered `ok`, because a `custom_route` bypasses that
+middleware. Phase A's Docker verification checked the health routes.
+Marketplace was fine only because `host="0.0.0.0"` makes FastMCP drop the
+setting, so a binding argument was deciding a security policy. Both servers
+now say so explicitly.
+
+Tenth lesson: **a health route is not evidence about the protocol path.**
+They are served by different middleware, and the one that answers first is
+the one least likely to be broken.
+
+Ninth lesson, and it is a cheerful one for once: **fixing an audit finding
+is itself an audit.** Four of the five transitions were untouched code that
+nobody had reason to reread; the fifth required editing all of them, and
+the false claim fell out immediately. When a change forces a sweep across
+every instance of some pattern, read what is already there — that sweep is
+the audit you are not otherwise going to run.
 
 ## Project Structure
 

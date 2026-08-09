@@ -62,13 +62,28 @@ def normalise(fields: dict[str, Any] | None) -> dict[str, str]:
     }
 
 
-def validate(fields: dict[str, Any] | None) -> dict[str, str]:
+def validate(
+    fields: dict[str, Any] | None,
+    *,
+    available_from: str | None = None,
+    today: date | None = None,
+) -> dict[str, str]:
     """Field-name -> error message, empty when the submission is valid.
 
     Returns *all* problems rather than the first, because spec.md US3 AS2
     requires the iframe to surface "the specific missing field(s)" -- a
     one-error-at-a-time API would make the user resubmit once per mistake
     and would make "without losing already-entered data" pointless.
+
+    `available_from` is the chosen car's `availability_date`. It is passed
+    in rather than looked up, because this server deliberately never
+    re-fetches a listing -- a second source of truth for listing values is
+    exactly what Principle I's grounding channel exists to avoid, so the
+    caller supplies the authoritative record (see server.py). Omitted, the
+    availability rule simply does not run.
+
+    `today` is injectable so the past-date rule is testable without
+    freezing the clock or writing a test that expires.
     """
     clean = normalise(fields)
     errors: dict[str, str] = {}
@@ -86,9 +101,30 @@ def validate(fields: dict[str, Any] | None) -> dict[str, str]:
     if phone and len(_PHONE_DIGITS.findall(phone)) < 7:
         errors["phone"] = "Enter a phone number with at least 7 digits."
 
+    # Three separate rules, deliberately ordered cheapest-first and each
+    # returning before the next can produce a confusing second message
+    # about a date that could not be parsed in the first place.
+    #
+    # The last two were missing entirely until the M4a Phase C audit: the
+    # form accepted a pickup date in the past, and a pickup date *before*
+    # the car was even available -- with the availability date printed on
+    # the same screen, three rows above the input. Neither is a security
+    # problem; both make the demo look like nobody read the record it is
+    # showing.
     pickup = clean.get("pickup_date")
-    if pickup and _parse_iso(pickup) is None:
+    pickup_date = _parse_iso(pickup)
+    if pickup and pickup_date is None:
         errors["pickup_date"] = "Enter a pickup date as YYYY-MM-DD."
+    elif pickup_date is not None:
+        if pickup_date < (today or date.today()):
+            errors["pickup_date"] = "Choose a pickup date that is not in the past."
+        else:
+            available = _parse_iso(available_from)
+            if available is not None and pickup_date < available:
+                errors["pickup_date"] = (
+                    f"This car is not available until {available.isoformat()}. "
+                    "Choose that date or later."
+                )
 
     return errors
 

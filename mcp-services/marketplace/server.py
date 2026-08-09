@@ -18,6 +18,7 @@ import os
 from typing import Any, Optional
 
 from mcp.server.fastmcp import FastMCP
+from mcp.server.transport_security import TransportSecuritySettings
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 
@@ -25,11 +26,26 @@ from marketplace import store
 
 PORT = int(os.environ.get("MCP_SERVICES_PORT", "8100"))
 
+# Stated explicitly as of M4a Phase C1, having been true here only by
+# accident: passing `host="0.0.0.0"` makes FastMCP set
+# `transport_security = None`, i.e. no DNS-rebinding protection. This
+# server has therefore accepted `Host: mcp-services:8100` since M3 purely
+# as a side effect of an argument about which interface to bind, while
+# booking -- which omitted `host=` -- got the localhost-only default and
+# returned `421 Misdirected Request` to every containerised MCP call.
+# Same rationale as booking/server.py's block; declared in both so the two
+# cannot silently diverge again, and so removing `host=` here cannot
+# quietly break the marketplace the way it broke booking.
+MARKETPLACE_TRANSPORT_SECURITY = TransportSecuritySettings(
+    enable_dns_rebinding_protection=False,
+)
+
 mcp = FastMCP(
     "car-marketplace",
     host="0.0.0.0",
     port=PORT,
     stateless_http=True,
+    transport_security=MARKETPLACE_TRANSPORT_SECURITY,
     instructions=(
         "Search a car marketplace. All prices, years and specs returned are "
         "authoritative records; never restate a value that did not come from "

@@ -23,14 +23,16 @@ its two behavioural guarantees, both proven against a live model: the three
 seeded prompt-injection listings cause zero deviation, and a search that
 matches nothing is widened *and said so*. The in-chat MCP Apps (booking
 form, mock checkout) are the remaining M4 work: the **booking MCP App server
-and its form bundle now exist and are verified** (M4a Phases A+B), but
-nothing opens the form in the chat yet — that is the rest of M4a.
+and its form bundle now exist and are verified** (M4a Phases A+B), and the
+agent can now **open the form for the car the user picked** (Phase C1 —
+tools, phase transitions, discovery). Rendering that form in the browser is
+the rest of M4a.
 
-**246 automated tests**, of which **237 run with no external setup at all**
-(83 `mcp-services` + 154 `agent-backend`); the remaining 9 need a live LLM key
+**284 automated tests**, of which **275 run with no external setup at all**
+(91 `mcp-services` + 184 `agent-backend`); the remaining 9 need a live LLM key
 and/or a running Phoenix and auto-skip without them. The 202 tests that
 existed on 2026-08-08 have been run green together against a live model and a
-running Phoenix; the 44 added since need no external setup and none is gated.
+running Phoenix; the 82 added since need no external setup and none is gated.
 Plus live end-to-end verification against a real Docker Compose build. See
 [`specs/001-ai-car-matchmaker/`](specs/001-ai-car-matchmaker/) for the full
 spec-driven-development trail:
@@ -89,11 +91,20 @@ the backend dying at startup.
 **marketplace** at `/mcp` (`search_listings`, `get_listing_details` over the
 203-listing mock dataset) and **booking** at `/booking/mcp`
 (`open_booking_form`, `submit_booking`, plus the `ui://booking/form.html`
-MCP App resource). The payment server lands in M4b. The agent currently
-discovers only the marketplace tools at startup, so `agent-backend`'s
-`/health` reports
-`mcp_connected` alongside `llm_configured` — `status` is `degraded` if
-either is missing.
+MCP App resource). The payment server lands in M4b. The agent discovers
+**both** servers at startup, so `agent-backend`'s `/health` reports
+`mcp_connected` (marketplace) and `booking_connected` alongside
+`llm_configured` — `status` is `degraded` if any is missing. Discovery is
+fail-soft in both directions: an unreachable booking server degrades the
+booking step rather than stopping the backend.
+
+`submit_booking` is deliberately **not** exposed to the model in any phase.
+It takes free-form form values, so a model-callable version could invent
+the user's contact details; it is reachable only from the booking form
+itself, through the MCP App bridge, with the values the user typed.
+`open_booking_form` *is* model-callable but takes **no arguments** — it
+reads the chosen listing from session state, so no price can enter through
+a tool call the model wrote.
 
 **How recommendations stay grounded**: once the interview is complete the
 backend runs the marketplace search itself, building the query from the
@@ -133,10 +144,19 @@ the Python image needs no Node stage. After editing anything under
 (cd mcp-apps-ui/booking-form && npm install && npm run build)
 ```
 
-⚠️ **Nothing detects a stale bundle** — the test suite passes green against
-an out-of-date `form.html`. The build itself does refuse to install one that
-references external assets (a sandboxed, opaque-origin iframe cannot load
-them) or that is missing the MCP Apps handshake.
+The build writes `form.html` **and** `form.build.json`, a manifest of
+SHA-256 hashes of every source that feeds the bundle. Commit both.
+`mcp-services/tests/test_booking_server.py` recomputes those hashes and
+fails when the committed artifact no longer matches its source, so a stale
+bundle is now caught by the ordinary test run rather than by noticing the
+form behaves like an older version of itself. (This works because the build
+is byte-deterministic: rebuilding an unchanged tree reproduces `form.html`
+exactly.) The check skips when the TypeScript sources are absent, e.g.
+inside the Python image.
+
+The build also still refuses to install a bundle that references external
+assets (a sandboxed, opaque-origin iframe cannot load them) or that is
+missing the MCP Apps handshake.
 
 The gate itself is on key *presence*, but an out-of-quota key no longer
 reads as a bug: a provider 429 that names a quota is routed through

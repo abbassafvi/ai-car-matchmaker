@@ -27,6 +27,7 @@ from app import app as composed_app
 from app import compose
 from booking import store
 from booking.server import (  # noqa: E501
+    BOOKING_TRANSPORT_SECURITY,
     FORM_HTML_PATH,
     FORM_MIME_TYPE,
     FORM_RESOURCE_URI,
@@ -327,3 +328,142 @@ def test_composing_runs_both_mounted_lifespans():
             # Anything but a hang or a 500 proves the manager is live and
             # handling requests at that path.
             assert response.status_code < 500, f"{path} -> {response.status_code}"
+
+
+# --- the committed bundle matches its source (finding 7) ------------------
+#
+# `form.html` is a committed build artifact and, until M4a Phase C, nothing
+# tied it to the source it came from. Demonstrated by the audit: a marker
+# appended to `src/main.ts` left all 83 tests green and never reached the
+# shipped file, so a stale bundle would have gone to a judge with no
+# symptom but a form quietly behaving like an older version of itself.
+#
+# `listings.json` has had a guard like this from the start (a test asserts
+# the committed file equals `generate()`), and the same idea works here
+# because the build turned out to be **byte-deterministic** -- rebuilding
+# from an unchanged tree reproduces `form.html` exactly, measured before
+# this was written. So hashing the inputs is a sound proxy for "the
+# artifact matches its source", and it needs no Node to check.
+
+import hashlib
+import json
+
+MANIFEST_PATH = FORM_HTML_PATH.parent / "form.build.json"
+BUNDLE_SOURCE_DIR = FORM_HTML_PATH.parents[3] / "mcp-apps-ui" / "booking-form"
+
+
+def _sha256(text: str) -> str:
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def test_the_bundle_ships_with_a_source_manifest():
+    assert MANIFEST_PATH.exists(), (
+        "form.build.json is missing. Rebuild the bundle with `npm run build` "
+        "in mcp-apps-ui/booking-form/ -- the manifest is what ties the "
+        "committed form.html to the source it was built from."
+    )
+    manifest = json.loads(MANIFEST_PATH.read_text())
+    assert manifest["sources"], "the manifest lists no source files"
+    assert manifest["bundle_sha256"] == _sha256(FORM_HTML_PATH.read_text()), (
+        "form.html does not match the hash recorded when it was installed -- "
+        "it was edited by hand, or a partial copy landed. Rebuild it."
+    )
+
+
+def test_the_committed_bundle_is_not_stale():
+    """The one this exists for.
+
+    Skipped rather than failed when the TypeScript sources are absent: the
+    Python image copies `mcp-services/` only, so a container running this
+    suite has the artifact and not its source. Skipping there and checking
+    in the repo is the honest split -- the check belongs wherever the
+    source can actually be seen.
+    """
+    if not BUNDLE_SOURCE_DIR.exists():
+        pytest.skip("mcp-apps-ui/booking-form is not present (source-less checkout)")
+
+    manifest = json.loads(MANIFEST_PATH.read_text())
+    drifted = [
+        relative
+        for relative, digest in manifest["sources"].items()
+        if _sha256((BUNDLE_SOURCE_DIR / relative).read_text()) != digest
+    ]
+    assert not drifted, (
+        f"the committed form.html was built from an older version of "
+        f"{', '.join(drifted)}. Run `npm run build` in mcp-apps-ui/booking-form/ "
+        f"and commit the result -- nothing else detects this."
+    )
+
+
+# --- reachable over a container network (Phase C1, found in Docker) -------
+
+
+def test_both_servers_disable_dns_rebinding_protection_explicitly():
+    """The defect `docker compose up` found that no unit test could.
+
+    FastMCP enables DNS-rebinding protection **by default**, allowlisting
+    `127.0.0.1:*` and `localhost:*` only, and answers `421 Misdirected
+    Request` to anything else. In Docker the backend calls
+    `http://mcp-services:8100/booking/mcp`, so every MCP request to booking
+    was rejected -- while `GET /booking/health` kept answering `ok`,
+    because a `custom_route` never passes through that middleware. Phase
+    A's "verified against the built image" checked the health route, saw
+    green, and moved on.
+
+    Marketplace was unaffected only because it passes `host="0.0.0.0"`,
+    which makes FastMCP drop the setting entirely: an argument about which
+    interface to bind was silently deciding a security policy, and the two
+    servers had opposite postures for a reason neither file mentioned.
+    Both now state it, and this pins both -- including marketplace, where
+    the property is currently a side effect and would vanish the day
+    someone removes `host=`.
+    """
+    from marketplace.server import mcp as marketplace_mcp
+
+    for name, server in (("booking", mcp), ("marketplace", marketplace_mcp)):
+        settings = server.settings.transport_security
+        assert settings is not None, (
+            f"{name} leaves transport_security implicit; that is how this "
+            f"broke -- state it so it cannot change by accident"
+        )
+        assert settings.enable_dns_rebinding_protection is False, (
+            f"{name} would answer 421 to Host: mcp-services:8100 and be "
+            f"unreachable from another container"
+        )
+
+
+def test_the_default_really_is_what_would_have_returned_421():
+    """Non-vacuity for the test above.
+
+    Asserting a settings flag proves the flag is set, not that the flag is
+    the thing that mattered -- §3's "a test that asserts a prompt contains
+    a rule proves the rule was written". So this drives a **real request
+    with a container-style Host header** through two throwaway servers, one
+    with FastMCP's default and one configured the way ours are, and shows
+    the 421 appearing and disappearing.
+
+    Throwaway servers, not the production ones: a FastMCP instance's
+    session manager is single-use per process, so entering the real apps'
+    lifespans here would break `test_marketplace_server.py` -- which is
+    exactly what happened when this test was first written.
+    """
+    from mcp.server.fastmcp import FastMCP
+
+    headers = {
+        "Host": "mcp-services:8100",
+        "Accept": "application/json, text/event-stream",
+        "Content-Type": "application/json",
+    }
+    body = {"jsonrpc": "2.0", "id": 1, "method": "ping"}
+
+    def status_for(**kwargs) -> int:
+        server = FastMCP("probe", stateless_http=True, **kwargs)
+        with TestClient(server.streamable_http_app()) as client:
+            return client.post("/mcp", json=body, headers=headers).status_code
+
+    assert status_for() == 421, (
+        "FastMCP's default no longer rejects a non-localhost Host -- if this "
+        "starts failing the explicit setting may no longer be needed, but "
+        "check before removing it"
+    )
+    assert status_for(transport_security=BOOKING_TRANSPORT_SECURITY) != 421

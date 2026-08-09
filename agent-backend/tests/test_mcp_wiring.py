@@ -58,7 +58,20 @@ def test_injected_tools_resolve_for_the_phases_the_gate_names_them_for():
     results_ready = {t.name for t in tools_for_phase(Phase.RESULTS_READY, resolved)}
     # select_listing landed in Phase E (T028b); before that it was named by
     # the gate and resolved to nothing, which this assertion used to record.
-    assert results_ready == {"search_listings", "get_listing_details", "select_listing"}
+    #
+    # `search_listings` came *out* of RESULTS_READY in M4a Phase C. The
+    # model could call it there, but nothing writes `candidate_listings`
+    # outside a research pass -- so it would find a car, describe it, the
+    # user would say "that one", and `select_listing` would refuse it as
+    # not being in the current slate. Reproduced before the change:
+    # "'LST-0099' is not in the current candidate slate (LST-0001,
+    # LST-0002)". `refine_search` replaces it with a path that updates the
+    # slate. `refine_search` itself is absent here because this registry is
+    # built from raw marketplace tools only -- it is a local wrapper from
+    # `tools.build_research_tools`, which is the point: the gate names it,
+    # and a name the registry cannot resolve is simply not bound.
+    assert results_ready == {"get_listing_details", "select_listing", "save_interview_state"}
+    assert "search_listings" not in results_ready
 
 
 def test_injection_cannot_widen_the_gate():

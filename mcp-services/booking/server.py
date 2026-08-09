@@ -28,10 +28,39 @@ from pathlib import Path
 from typing import Any
 
 from mcp.server.fastmcp import FastMCP
+from mcp.server.transport_security import TransportSecuritySettings
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 
 from booking import store
+
+# ⚠️ Stated explicitly, and it is not cosmetic.
+#
+# FastMCP turns DNS-rebinding protection **on by default**, with an
+# allowlist of `127.0.0.1:*` / `localhost:*` only. Anything else in the
+# `Host` header gets `421 Misdirected Request`. Inside Docker the backend
+# calls `http://mcp-services:8100/booking/mcp`, so every MCP request to
+# this server was rejected -- while `GET /booking/health` kept answering
+# `{"status":"ok"}`, because a `custom_route` never passes through that
+# middleware. Phase A's "verified against the built image" checked the
+# health route and therefore saw nothing wrong.
+#
+# `marketplace/server.py` was never affected, and not by design: passing
+# `host="0.0.0.0"` makes FastMCP set `transport_security = None`
+# altogether. A parameter that reads as "which interface do I bind" also
+# silently decides a security policy, so the two servers had opposite
+# postures for a reason neither file mentioned. Setting it here explicitly
+# means the posture is auditable and cannot be flipped by editing an
+# unrelated-looking argument -- and `test_booking_server.py` pins it.
+#
+# Off, rather than allowlisting the compose service name: these servers sit
+# on a private compose network and are called by the backend, never by a
+# browser, so the attack the protection exists to stop (a page in the
+# user's browser resolving a hostile name to 127.0.0.1) has no path here.
+# An allowlist would also break silently the day the service is renamed.
+BOOKING_TRANSPORT_SECURITY = TransportSecuritySettings(
+    enable_dns_rebinding_protection=False,
+)
 
 FORM_RESOURCE_URI = "ui://booking/form.html"
 FORM_MIME_TYPE = "text/html;profile=mcp-app"
@@ -51,6 +80,7 @@ LISTING_DISPLAY_FIELDS = (
 mcp = FastMCP(
     "car-booking",
     stateless_http=True,
+    transport_security=BOOKING_TRANSPORT_SECURITY,
     instructions=(
         "Open and submit the in-chat booking form for a car the user has "
         "already selected. Never invent listing values; the caller supplies "
@@ -96,19 +126,28 @@ def open_booking_form(listing: dict[str, Any]) -> dict[str, Any]:
 
 
 @mcp.tool()
-def submit_booking(listing_id: str, fields: dict[str, Any]) -> dict[str, Any]:
+def submit_booking(
+    listing_id: str,
+    fields: dict[str, Any],
+    available_from: str | None = None,
+) -> dict[str, Any]:
     """Validate and submit a completed booking form.
 
     Args:
         listing_id: Id of the listing being booked.
         fields: The submitted form values.
+        available_from: The car's `availability_date`, so a pickup date
+            before it can be rejected. Passed in rather than looked up:
+            this server never re-fetches a listing, because a second
+            source of listing values could diverge from the persisted
+            record the whole grounding channel rests on (Principle I).
 
     Returns {"ok": true, "booking": {...}} on success, or {"ok": false,
     "errors": {field: message}} when validation fails. Validation is
     server-side and authoritative -- the form's own checks are a
     convenience, not the guarantee.
     """
-    errors = store.validate(fields)
+    errors = store.validate(fields, available_from=available_from)
     if errors:
         # Not an exception: the caller has to hand these back to the form so
         # the user can fix them without losing what they already typed

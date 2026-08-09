@@ -57,12 +57,30 @@ def test_selecting_advances_the_phase_in_code():
 def test_selection_unlocks_exactly_the_booking_tools():
     """Principle II end to end: the gate opens on the transition, and only
     to the booking phase's tools.
+
+    Two changes here in M4a Phase C, both deliberate and both the contract
+    rather than merely an updated expectation:
+
+    - `submit_booking` is **gone** from the model's tool set. Its `fields`
+      argument is free-form, so a model-callable version could invent the
+      user's name and email into a booking they never made. It is reachable
+      only through the MCP App bridge, carrying values the user typed. A
+      name left in the gate table that nothing binds is the hole M2.5 left
+      with `select_listing`, so it was removed rather than merely unbound.
+    - `select_listing` and `refine_search` are **added**, so FORM_FILLING
+      stops being a one-way door: before this, a user who typed "actually,
+      the Kia" had no tool that could help them, while a user who *clicked*
+      another card sailed through, because `_handle_action` runs ahead of
+      the gate.
     """
     session = results_ready_session()
     assert "open_booking_form" not in session.available_tools()
 
     session.select_listing("LST-0001")
-    assert session.available_tools() == ["open_booking_form", "submit_booking"]
+    assert session.available_tools() == [
+        "open_booking_form", "select_listing", "refine_search",
+    ]
+    assert "submit_booking" not in session.available_tools()
 
 
 def test_cannot_select_a_listing_that_was_never_recommended():

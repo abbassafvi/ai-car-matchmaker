@@ -868,19 +868,45 @@ against Gemini (~5 requests). **M3 verification is complete.**
 
 ### Tests for User Story 3
 
-**Status 2026-08-09**: Phases A and B shipped (T033 server half, T032).
-**Phase C is next and starts with the audit worklist in HANDOFF §14.**
+**Status 2026-08-09**: Phases A, B and **C1** shipped. C1 was the whole
+HANDOFF §14 audit worklist plus the backend tools and transitions. **C2 (the
+MCP App WebSocket envelope) and D (the browser host) remain.**
 
-- [ ] T030 [P] [US3] Contract test: `open_booking_form` unavailable to the
-      model when no listing is selected (Principle II). **Phase C.**
-      Must also pin the corrected gate: `submit_booking` is **not**
-      model-callable (decision 2026-08-09), so it must be absent from
-      `TOOLS_BY_PHASE[FORM_FILLING]` — a name in that table that nothing
-      binds is exactly the hole M2.5 left with `select_listing`.
+- [x] T030 [P] [US3] Contract test: `open_booking_form` unavailable to the
+      model when no listing is selected (Principle II). **DONE (Phase C1)**
+      — `tests/test_booking_gate.py` (8 tests).
+
+      The original wording aimed at tool *names*; the audit found the real
+      exposure one level down, in the **schemas**, so the load-bearing
+      assertions are about what the model can *say*, not what it can call:
+
+      - `open_booking_form`'s **`tool_call_schema` has no properties at
+        all**. Not `args_schema` — that still lists `state`/`tool_call_id`,
+        which the graph fills; `tool_call_schema` is the filtered view the
+        provider actually receives. With no arguments there is no channel
+        through which a retyped price could enter, so Principle I becomes
+        structural rather than prompt-enforced.
+      - `submit_booking` absent from `TOOLS_BY_PHASE` **and** from every
+        compiled agent's bound tools, per the 2026-08-09 decision.
+      - **The raw MCP tools never reach the registry.** The trap that would
+        silently undo both: `resolve_registry` resolves extras *over* the
+        local registry (measured — `registry[name] = tool`), so injecting
+        the booking server's tools the way the marketplace's are injected
+        would replace the wrapper with the very thing it prevents, while
+        the name stays bound and the phase stays gated. Pinned by asserting
+        the resolved tool is *not* the raw one.
 - [ ] T031 [P] [US3] Integration test: incomplete submission rejected
-      server-side without data loss in the iframe. **Phase C.**
-      Non-vacuity: assert the already-entered values **survived** the
-      rejection round trip, not merely that errors came back.
+      server-side without data loss in the iframe. **Server half done in
+      Phase C1; the iframe half is Phase D.**
+
+      Verified live against the running booking server: an incomplete
+      submission returns `{"ok": false}` naming **all three** missing
+      fields at once, and a valid one is accepted with a card-like field
+      dropped by the allowlist. Still owed is the *iframe* clause — that
+      already-entered values survive the rejection round trip — which
+      cannot be asserted until Phase D renders the form. The mechanism
+      exists (`entered` lives outside the DOM, T032); per §3 lesson 9 that
+      is not the same as having watched it.
 
 ### Implementation for User Story 3
 
@@ -951,6 +977,34 @@ against Gemini (~5 requests). **M3 verification is complete.**
       year — Principle I violated by construction. Wrap both in local
       `@tool`s with `InjectedState` (the `select_listing` pattern), and drop
       `submit_booking` from the model-facing gate entirely.
+
+      ✅ **Done in Phase C1**, and one thing about it is worth recording
+      because the obvious implementation is the wrong one. Wrapping was not
+      enough on its own: the raw MCP tools also had to be kept **out of
+      `extra_tools`**, because `resolve_registry` lets an injected tool win
+      over a local one of the same name. Add the booking server's tools the
+      way the marketplace's are added and the raw `open_booking_form`
+      silently overwrites the wrapper — same name, same phase, all tests
+      green. They are discovered into their own list
+      (`discover_booking_tools`), never injected, and reached only through
+      the closure in `tools.build_booking_tools`. Also changed here:
+      `submit_booking` gained an optional `available_from`, so a pickup
+      date before the car exists can be rejected without this server ever
+      looking a listing up (finding 9).
+
+      🔴 **And one defect this task shipped, found in Phase C1 by running
+      `docker compose up`.** FastMCP enables DNS-rebinding protection by
+      default, allowlisting `127.0.0.1:*`/`localhost:*` only, so the
+      booking server answered **421 Misdirected Request** to
+      `Host: mcp-services:8100` — i.e. to every MCP request the backend
+      could make from its own container. `GET /booking/health` kept
+      answering `ok` throughout, because a `custom_route` bypasses that
+      middleware, which is why this task's "verified against the built
+      image" missed it. Marketplace escaped only because `host="0.0.0.0"`
+      makes FastMCP drop the setting entirely. Both servers now state
+      `transport_security` explicitly. Re-verified in Docker:
+      `booking_connected: true` and a real `open_booking_form` call across
+      the container network.
 - [ ] T034 [US3] `frontend/src/mcp-app-host/`: Host implementation —
       iframe sandbox creation, deny-by-default CSP, postMessage bridge.
       **Phase D.** Note the `ext-apps/examples/basic-host` reference in the
@@ -961,17 +1015,37 @@ against Gemini (~5 requests). **M3 verification is complete.**
       WebSocket — no MCP client in the browser. Verified by reading the
       1.7.5 bundle. The iframe renders **in the chat column**.
 - [ ] T035 [US3] FORM_FILLING wiring, AWAITING_PAYMENT transition on valid
-      submission. **Phase C.** `SessionState.submit_booking()` is the
-      **fourth** phase transition and belongs beside the existing three, so
-      every transition stays one code path in one module (Principle II).
-      Guard duplicate submits. Note the original wording put this in
-      `agent/graph.py`; the precedent it should actually follow is
-      `api/main.py::_run_research_turn` (code-driven kickoff) plus
-      `state.py` (the transition itself).
+      submission. **State half DONE (Phase C1); the WebSocket envelope and
+      the code-driven kickoff are C2.**
+
+      `SessionState.submit_booking()` exists and is the transition, beside
+      the other four in `state.py` (Principle II). It refuses three things
+      rather than passing silently: a wrong phase, a **second** submit (the
+      App bridge is a network path, so a retry or a reconnect must not
+      produce two bookings), and a booking whose `listing_id` disagrees
+      with the session's selection — the iframe is untrusted input and the
+      backend must not take its word for which car this is.
+
+      Two transitions were added, not one. `refine_results` is the fifth
+      and runs **backwards**, {RESULTS_READY, FORM_FILLING} → RESULTS_READY,
+      discarding the selection and any in-progress booking. That is what
+      stops FORM_FILLING being a one-way door (§14 finding 5) and what
+      makes spec.md's "the prior in-progress booking is discarded, not
+      silently merged" true (finding 3).
+
+      Also landed here, since every transition was being touched anyway:
+      each one now emits an **OTel span** naming the trigger. Principle V
+      claims spans for phase transitions and there had never been one — a
+      grep for `get_tracer` across production code returned nothing, and
+      the two transitions that happen outside a graph run (`_handle_action`,
+      and now the App bridge) are invisible to `auto_instrument`.
 
 **Checkpoint**: User can select a listing and complete a booking form
-without leaving the chat. **Not reached yet** — Phases A+B built the server
-and the form; nothing opens it in the chat until Phases C and D land.
+without leaving the chat. **Not reached yet.** Phases A+B built the server
+and the form; C1 gave the agent a safe way to open it and a place to put
+the result. What is missing is the wire between them: C2's `mcp_app`
+WebSocket envelope (and its reverse channel for the App's `tools/call`),
+then D's iframe host. Nothing is on a user's screen until D.
 
 ---
 

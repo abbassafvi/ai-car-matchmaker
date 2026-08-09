@@ -9,13 +9,32 @@
  * demo time, because the sandboxed document has an opaque origin and cannot
  * fetch it. Better to fail the build.
  */
+import { createHash } from "node:crypto";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const source = resolve(here, "..", "dist", "index.html");
+const projectRoot = resolve(here, "..");
 const target = resolve(here, "..", "..", "..", "mcp-services", "booking", "static", "form.html");
+const manifestTarget = resolve(dirname(target), "form.build.json");
+
+/**
+ * Every input that can change the bundle's contents. Listed explicitly
+ * rather than globbed so that adding a source file is a deliberate act
+ * that shows up in a diff — a glob would silently start covering a file
+ * nobody meant to include, and silently stop covering one that moved.
+ */
+const SOURCE_FILES = [
+  "src/main.ts",
+  "src/styles.css",
+  "index.html",
+  "vite.config.ts",
+  "package.json",
+];
+
+const sha256 = (text) => createHash("sha256").update(text, "utf8").digest("hex");
 
 const html = readFileSync(source, "utf8");
 
@@ -42,6 +61,36 @@ if (!html.includes("ui/initialize")) {
   process.exit(1);
 }
 
+/**
+ * The staleness manifest.
+ *
+ * `form.html` is a committed build artifact and, until this existed,
+ * nothing tied it to the source it came from. Demonstrated by the M4a
+ * Phase C audit: a marker appended to `src/main.ts` left all 83
+ * mcp-services tests green and never reached the shipped file. The bundle
+ * would have been silently out of date in front of a judge, and the only
+ * symptom would have been a form behaving like an older version of itself.
+ *
+ * `listings.json` has had a guard like this from the start (a test asserts
+ * the committed file equals `generate()`), and the same idea works here
+ * because the build turned out to be byte-deterministic: rebuilding from
+ * an unchanged tree reproduces `form.html` exactly. So a hash of the
+ * inputs is a sound proxy for "the artifact matches its source", and
+ * `mcp-services/tests/test_booking_server.py` recomputes it and fails when
+ * the two drift — no Node required to run the check.
+ */
+const sources = Object.fromEntries(
+  SOURCE_FILES.map((relative) => [
+    relative,
+    sha256(readFileSync(resolve(projectRoot, relative), "utf8")),
+  ]),
+);
+
 mkdirSync(dirname(target), { recursive: true });
 writeFileSync(target, html);
+writeFileSync(
+  manifestTarget,
+  JSON.stringify({ sources, bundle_sha256: sha256(html), bytes: html.length }, null, 2) + "\n",
+);
 console.log(`Installed ${(html.length / 1024).toFixed(0)} KB -> ${target}`);
+console.log(`Wrote source manifest -> ${manifestTarget}`);

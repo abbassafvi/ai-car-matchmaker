@@ -1,4 +1,4 @@
-"""T024 — marketplace tool discovery over MCP (Streamable HTTP).
+"""T024/T033 — MCP tool discovery over Streamable HTTP.
 
 Discovery is deliberately a startup-time concern rather than a per-turn one:
 `create_deep_agent` fixes an agent's tool set at construction, so the tools
@@ -23,16 +23,111 @@ from __future__ import annotations
 
 import logging
 import os
+import uuid
+from typing import Any
 
 log = logging.getLogger(__name__)
 
 DEFAULT_MARKETPLACE_URL = "http://localhost:8100/mcp"
+DEFAULT_BOOKING_URL = "http://localhost:8100/booking/mcp"
 
 # The tools we expect the marketplace server to expose. Discovery returning
 # something *other* than this is worth a warning rather than a silent pass:
 # the phase gate names these tools, so a rename on the server side would
 # otherwise show up only as research quietly never happening.
 EXPECTED_MARKETPLACE_TOOLS = {"search_listings", "get_listing_details"}
+
+# The booking server's tools (M4a). ⚠️ These must **never** be handed to
+# `PhaseAgentRegistry(extra_tools=...)`. `graph.resolve_registry()` resolves
+# extras *over* the local registry (`registry[tool.name] = tool`, extras
+# win), and `TOOLS_BY_PHASE[FORM_FILLING]` names `open_booking_form` -- so
+# injecting the raw MCP tool would silently replace the local wrapper with
+# the one whose schema demands the whole listing record, reinstating the
+# Principle I violation the wrapper exists to prevent, with every test
+# still green. They are discovered separately, kept out of `extra_tools`,
+# and reached only by backend code: `agent/tools.py::build_booking_tools`
+# closes over them, and the MCP App bridge calls `submit_booking` directly.
+EXPECTED_BOOKING_TOOLS = {"open_booking_form", "submit_booking"}
+
+
+async def _discover(label: str, endpoint: str, expected: set[str]) -> list:
+    """Adapted LangChain tools for one MCP server, or `[]`.
+
+    Never raises, for either server: the caller cannot meaningfully recover
+    from a discovery failure mid-startup, and taking the whole backend down
+    over an optional downstream is a worse outcome than a degraded one that
+    says so.
+    """
+    try:
+        from langchain_mcp_adapters.client import MultiServerMCPClient
+
+        client = MultiServerMCPClient({
+            label: {"transport": "streamable_http", "url": endpoint},
+        })
+        tools = await client.get_tools()
+    except Exception as exc:  # pragma: no cover - depends on mcp-services availability
+        log.warning(
+            "%s tools unavailable at %s -- that capability will be degraded: %s",
+            label, endpoint, exc,
+        )
+        return []
+
+    discovered = {tool.name for tool in tools}
+    missing = expected - discovered
+    if missing:
+        log.warning(
+            "%s server at %s did not expose expected tool(s): %s",
+            label, endpoint, ", ".join(sorted(missing)),
+        )
+
+    log.info("Discovered %d %s tool(s) at %s: %s",
+             len(tools), label, endpoint, ", ".join(sorted(discovered)))
+    return tools
+
+
+async def discover_booking_tools(url: str | None = None) -> list:
+    """Adapted LangChain tools for the booking MCP server, or `[]`.
+
+    Kept deliberately separate from the marketplace's list rather than
+    merged into one `MultiServerMCPClient` call: the two sets have different
+    privileges. Marketplace tools are model-facing and are injected into the
+    agent registry; booking tools are **not**, for the reason recorded on
+    `EXPECTED_BOOKING_TOOLS` above. Two lists make that difference
+    structural instead of a comment someone has to notice.
+    """
+    endpoint = url or os.environ.get("MCP_BOOKING_URL", DEFAULT_BOOKING_URL)
+    return await _discover("booking", endpoint, EXPECTED_BOOKING_TOOLS)
+
+
+async def call_structured(tool, args: dict[str, Any]) -> dict[str, Any]:
+    """Invoke an adapted MCP tool and return its `structured_content`.
+
+    The typed grounding channel (HANDOFF §8.5): `ToolMessage.artifact
+    ["structured_content"]` holds real dicts with real ints, while
+    `.content` holds a stringified copy. Backend code reads the artifact.
+
+    Note a failed MCP call arrives as a `ToolMessage` with `status ==
+    "error"` rather than as an exception (§8.7a), so "no exception" does
+    not mean "it worked" and the status is checked explicitly.
+    """
+    message = await tool.ainvoke({
+        "args": args,
+        "id": f"{tool.name}-{uuid.uuid4().hex[:8]}",
+        "name": tool.name,
+        "type": "tool_call",
+    })
+
+    if getattr(message, "status", None) == "error":
+        raise RuntimeError(f"{tool.name} failed: {message.content}")
+
+    artifact = getattr(message, "artifact", None) or {}
+    structured = artifact.get("structured_content")
+    if not isinstance(structured, dict):
+        raise RuntimeError(
+            f"{tool.name} returned no structured_content -- the grounding "
+            f"channel is broken, refusing to fall back to prose. Got: {artifact!r}"
+        )
+    return structured
 
 
 async def discover_marketplace_tools(url: str | None = None) -> list:
@@ -43,29 +138,4 @@ async def discover_marketplace_tools(url: str | None = None) -> list:
     downstream is a worse outcome than a degraded one that says so.
     """
     endpoint = url or os.environ.get("MCP_MARKETPLACE_URL", DEFAULT_MARKETPLACE_URL)
-
-    try:
-        from langchain_mcp_adapters.client import MultiServerMCPClient
-
-        client = MultiServerMCPClient({
-            "marketplace": {"transport": "streamable_http", "url": endpoint},
-        })
-        tools = await client.get_tools()
-    except Exception as exc:  # pragma: no cover - depends on mcp-services availability
-        log.warning(
-            "Marketplace tools unavailable at %s -- research will be degraded: %s",
-            endpoint, exc,
-        )
-        return []
-
-    discovered = {tool.name for tool in tools}
-    missing = EXPECTED_MARKETPLACE_TOOLS - discovered
-    if missing:
-        log.warning(
-            "Marketplace server at %s did not expose expected tool(s): %s",
-            endpoint, ", ".join(sorted(missing)),
-        )
-
-    log.info("Discovered %d marketplace tool(s) at %s: %s",
-             len(tools), endpoint, ", ".join(sorted(discovered)))
-    return tools
+    return await _discover("marketplace", endpoint, EXPECTED_MARKETPLACE_TOOLS)

@@ -5,15 +5,19 @@ continue this project with zero re-discovery and without repeating mistakes
 already made and fixed. Read this file first, then the files listed in
 [§13 Required reading](#13-required-reading).
 
-**Last updated**: 2026-08-09, after **M4a Phases A and B** shipped.
-**M3 is complete.** **M4a is in progress**: Phases A (booking MCP server) and
-B (the booking-form MCP App bundle) are done and pushed; **Phase C is next**
-and starts with a list of audit fixes — see §14.
+**Last updated**: 2026-08-09, after **M4a Phase C1** shipped.
+**M3 is complete.** **M4a is in progress**: Phases A (booking MCP server),
+B (the booking-form MCP App bundle) and **C1 — the whole §14 audit worklist
+plus the backend tools and transitions** — are done. **C2 is next**: the
+`mcp_app` WebSocket envelope, its reverse channel, and the code-driven
+kickoff. See §10.
 
 > **Treat every claim in this file as a claim, not as truth.** Seven separate
 > audits have now found docs asserting behaviour the code did not have — and
-> one found the inverse. The numbers below were measured on 2026-08-09, not
-> copied forward. See §3.
+> one found the inverse. An eighth correction came not from an audit but
+> from *fixing* the seventh one — see §3's last block, which is the cheapest
+> way any of these has been found. The numbers below were measured on
+> 2026-08-09, not copied forward.
 
 ---
 
@@ -35,7 +39,7 @@ and a *mocked* checkout **without leaving the chat**.
 |---|---|---|
 | 1 | Multistep agent: interview → research → ranked+explained recommendations | ✅ interview → auto-research → deterministic ranking + explanations, all surfaced via **A2UI** since Phase D (verified live end to end) |
 | 2 | Interview captures: use case, car type/category, budget, buy-vs-rent, target date | ✅ |
-| 3 | **Form-filling MUST be an MCP App** rendered inside the chat | 🟡 **M4a in progress.** The booking MCP App server and its `ui://` form bundle exist and are verified (Phases A+B). **Not yet met**: nothing opens the form in the chat — that is Phase C (backend wiring) + Phase D (the frontend iframe host) |
+| 3 | **Form-filling MUST be an MCP App** rendered inside the chat | 🟡 **M4a in progress.** The booking MCP App server and its `ui://` form bundle exist and are verified (Phases A+B); the agent can now open the form for the chosen car, safely, and record the resulting booking (Phase C1, verified live against the running server). **Not yet met**: nothing carries it to the browser — that is C2 (the WS envelope) + D (the iframe host) |
 | 4 | **Mock payment/checkout MUST be an MCP App** rendered inside the chat | ⬜ M4b |
 | 5 | Car catalogue + live agent progress (interview state, search status, **reasoning steps**) MUST render via **A2UI** — explicitly *"not static HTML"* | ✅ **satisfied in Phase D (T026)**. Three A2UI surfaces render live: `interview-progress`, `research-reasoning` (per-step trace with icons) and `catalogue` (ranked cards). The `{"type":"progress"}` placeholder is deleted. Verified in a real browser against the real stack |
 | 6 | No real payments, no BMW Group APIs — checkout fully mocked | ✅ by construction |
@@ -104,7 +108,13 @@ M4a  🟡 IN PROGRESS — Booking form MCP App (User Story 3)
                    mount (app.py). Verified live over HTTP and in Docker
        ✅ Phase B  T032: mcp-apps-ui/booking-form/ -> one self-contained
                    form.html, committed into mcp-services/booking/static/
-       ⬜ Phase C  backend wiring + the audit fixes in §14 — START HERE
+       ✅ Phase C1 T030 + the T035 state half + ALL TWELVE §14 findings.
+                   Gate corrected, 2 new transitions, argument-free
+                   open_booking_form, refine_search, booking discovery,
+                   phase spans, bundle staleness guard. 22/22 live checks
+                   against the real two-server process
+       ⬜ Phase C2 the {"type":"mcp_app"} WS envelope + reverse channel +
+                   code-driven kickoff — START HERE (§10)
        ⬜ Phase D  T034 frontend iframe host (AppBridge), then click it
        ⬜ Phase E  full-stack verify, docs, push
 M4b  ⬜ Mock checkout MCP App (User Story 4)
@@ -114,22 +124,29 @@ M6   ⬜ Hardening, E2E tests, README finalization
        ⏸️ deck (#13) + demo video (#14) — LAST, and the user's to own
 ```
 
-**Test suite: 246 total** (measured 2026-08-09 after M4a Phase B, not copied
-forward — `python -m pytest tests/ -q` in each service).
+**Test suite: 284 total** (measured 2026-08-09 after M4a Phase C1, not copied
+forward — `pytest tests/ -q` in each service).
 
 | Suite | Tests | Gated | Files |
 |---|---|---|---|
-| `mcp-services` | **83** | 0 | `test_generate_listings` (8), `test_marketplace` (22), `test_marketplace_server` (9), `test_booking` (20), `test_booking_server` (24) |
-| `agent-backend` | **163** | 9 | 19 modules, see §7 — **unchanged by M4a so far** |
+| `mcp-services` | **91** | 0 | `test_generate_listings` (8), `test_marketplace` (22), `test_marketplace_server` (9), `test_booking` (**26**), `test_booking_server` (**26**) |
+| `agent-backend` | **193** | 9 | 23 modules, see §7 |
 
-- **237 pass with no external setup** (83 + 154)
+- **275 pass with no external setup** (91 + 184)
 - ⚠️ **The live sweep has NOT been re-run since 2026-08-08.** On that date
   all 202 then-existing tests passed together with a live key and Phoenix
   running (`agent-backend` **163 passed, 0 skipped**, `mcp-services` 39),
   costing **19 Groq requests** for 9 gated tests / ~20 model turns. Every
-  test added since (the 44 in M4a Phases A+B) needs **no** external setup
-  and none is gated, so the live figure should still be 163/0 — but that is
-  an inference, not a measurement. Re-run before claiming it.
+  test added since (the 82 across M4a Phases A, B and C1) needs **no**
+  external setup and none is gated, so the live figure should now be
+  **193/0** — but that is an inference, not a measurement. Re-run before
+  claiming it.
+  ⚠️ Also unmeasured live: **Phase C1 changed three prompts** (a new
+  `FORM_FILLING_SYSTEM_PROMPT`, a `refine_search` instruction in
+  RESULTS_READY, and `TRANSACTION_SYSTEM_PROMPT` narrowed to checkout).
+  Their *content* is unit-tested; their *effect on a model* is not. §3
+  lesson 14 is that prompt defects are usually about ordering and are
+  invisible until a real turn runs, so budget a live pass in C2/D.
   A quota 429 **skips** rather than failing (§8.32), so a constrained
   re-run still reads honestly.
 - Exactly **9** gated tests, up from 3: the six new Phase F live tests join
@@ -148,7 +165,11 @@ a trailing `docs:` commit that stamps this section cannot list its own sha,
 so this block may lag HEAD by one or two docs-only commits — check
 `git log --oneline -5` rather than trusting it:
 ```
-(this docs: commit)  docs: re-tier HANDOFF for M4a; record the build-first priority
+(this commit)  M4a Phase C1: the audit worklist, booking tools, transitions
+7bca1df  docs: record the M4a A/B audit, and correct four stale doc claims
+69f9ac5  M4a Phase B (T032): the booking form, built as a real MCP App
+1189f91  M4a Phase A (T033 server half): booking MCP App server
+6821aaa  docs: re-tier the handoff for M4a and record the build-first priority
 47ec1d1  T049: draft the deck — the template blocker was mis-scoped
 7f43990  T029: verify the untrusted-data boundary on Gemini too — M3 fully closed
 7ca39a9  docs: record the full live sweep, now green, and a fourth key to rotate
@@ -318,6 +339,44 @@ And one about a doc, found by measurement:
 | Was claimed | Reality found |
 |---|---|
 | §6's "How to run everything" test counts | All three were M2-era: `35` (actual 39 at the time, 83 now), `79 pass, 3 skip` (actual 154/9), `82 pass, 0 skip` (actual 163/0). Sitting **directly below** the §2 block that says its numbers were measured and not copied forward. Corrected 2026-08-09 |
+
+### Found while FIXING the M4a A/B audit (2026-08-09, Phase C1) — not by an audit at all
+
+**The cheapest way any of these has ever been found, and worth copying.**
+Phase C1 had to add two phase transitions, which meant editing all five in
+`SessionState`. Reading the four that were already there — code nobody had
+a reason to reopen — made an old false claim obvious immediately.
+
+| Was claimed | Reality found |
+|---|---|
+| Principle V, PASS since M2.5: "every LLM call, tool call, **and phase transition** emits an OTel span" | Two thirds true. `auto_instrument` traces anything inside a LangChain/LangGraph **run** — but a grep for `get_tracer`/`start_as_current_span` across all of `agent-backend`'s production code returned **zero hits**, and `_handle_action` advances RESULTS_READY → FORM_FILLING through `aupdate_state` with no run at all. So the catalogue-click transition had been **untraced since Phase E shipped it**, and C2's App-bridge submit was about to be the second one. Fixed by emitting from inside `SessionState`, beside each mutation, rather than at the call sites |
+
+**Ninth lesson: fixing an audit finding is itself an audit.** Not because
+the fix is risky, but because a change that forces a sweep across every
+instance of a pattern makes you read code you had no other reason to
+reread. Four of those five transitions were untouched; the false claim fell
+out of the sweep in minutes, having survived five audits that were each
+looking somewhere else. When a task makes you visit every `X`, read every
+`X`.
+
+**Eleventh lesson: a health route is not evidence about the protocol
+path.** `GET /booking/health` answered `{"status":"ok"}` from a container
+whose MCP endpoint `421`-ed every request the backend could make, because
+FastMCP's `custom_route` bypasses the transport-security middleware that
+was doing the rejecting. Phase A's "verified against the built Docker
+image" checked the health routes and was satisfied. **Verify the path the
+product actually uses**, over the network it actually uses it on: the bug
+was invisible over `127.0.0.1` and unmissable the moment one container
+called another. (§14 finding 13.)
+
+**Tenth lesson, from the same pass: the safe-looking fix can be the trap.**
+§14's own recommendation was "wrap the booking MCP tools in local `@tool`s".
+Doing exactly that, and *also* discovering the booking tools into
+`extra_tools` the way the marketplace's are discovered, would have silently
+undone it — `resolve_registry` resolves extras **over** the local registry
+(`registry[name] = tool`, measured), so the raw `open_booking_form` would
+have overwritten the wrapper. Same name, same phase, same green suite. A
+remediation earns the same scepticism as the thing it remediates.
 
 **Lessons worth keeping:**
 0. **Unwired code is unaudited code.** A milestone that lands a server, a
@@ -544,8 +603,8 @@ docker compose up --build
 
 # Tests (run the FULL suite together, never file-by-file — see §8.31)
 source .venv/bin/activate
-(cd mcp-services  && python -m pytest tests/ -q)   # 83 pass, no setup needed
-(cd agent-backend && python -m pytest tests/ -q)   # 154 pass, 9 skip (no key)
+(cd mcp-services  && python -m pytest tests/ -q)   # 91 pass, no setup needed
+(cd agent-backend && python -m pytest tests/ -q)   # 184 pass, 9 skip (no key)
 # Bare `pytest tests/` also works now. It did NOT before the Phase C
 # audit -- both suites died at collection, and only `python -m pytest`
 # worked, because it puts the cwd on sys.path. Fixed with a conftest.py
@@ -554,9 +613,11 @@ source .venv/bin/activate
 # With live LLM (see §5) and Phoenix:
 docker compose up -d phoenix
 set -a && . agent-backend/.env && set +a
-(cd agent-backend && python -m pytest tests/ -q)   # expect 163 pass, 0 skip
-                                                   # (not re-measured since
-                                                   #  2026-08-08 — see §2)
+(cd agent-backend && python -m pytest tests/ -q)   # expect 193 pass, 0 skip
+                                                   # (INFERRED: last measured
+                                                   #  2026-08-08 at 163/0; the
+                                                   #  82 tests added since are
+                                                   #  all ungated — see §2)
 
 # Regenerate mock dataset (deterministic — byte-identical each run;
 # a test asserts the committed file equals generate())
@@ -566,9 +627,11 @@ python mcp-services/data/generate_listings.py
 # edit to mcp-apps-ui/booking-form/src/ -- the committed form.html is a build
 # artifact and NOTHING currently detects that it is stale (§14 finding 7).
 (cd mcp-apps-ui/booking-form && npm install && npm run build)
-#   -> writes mcp-services/booking/static/form.html (277,722 bytes as of
-#      2026-08-09) and refuses to install a bundle that is not
-#      self-contained or is missing the MCP Apps handshake
+#   -> writes mcp-services/booking/static/form.html AND form.build.json
+#      (the source-hash manifest). Commit both. Refuses to install a bundle
+#      that is not self-contained or is missing the MCP Apps handshake.
+#      Since Phase C1 a stale bundle IS detected: test_booking_server.py
+#      recomputes the manifest and fails on drift.
 
 # Dev servers — use the Browser pane's preview_start with
 # {name: "agent-backend"} / {name: "frontend"}, NOT bash.
@@ -585,6 +648,9 @@ python mcp-services/data/generate_listings.py
   is not self-healing: discovery runs once at startup and agents cache their
   tools, so mcp-services coming back needs a backend restart.
 - `mcp-services`: `{"status":"ok","service":"mcp-services","servers":["marketplace"],"listings":203}`
+- `agent-backend` also reports **`booking_connected`** since Phase C1,
+  separate from `mcp_connected` (which still means the marketplace alone,
+  as every M0-M3 caller reads it). `status` degrades if either is false.
 - `mcp-services` booking (M4a): `GET /booking/health` →
   `{"status":"ok","service":"booking","form_resource":"ui://booking/form.html","form_bundle_present":true}`
   — `form_bundle_present:false` means the Phase B bundle was never built
@@ -608,21 +674,22 @@ python mcp-services/data/generate_listings.py
 ### agent-backend (Python)
 | File | Purpose |
 |---|---|
-| `agent/state.py` | `Phase` (6), `InterviewState`, `SessionState`, `RankedRecommendation`, `Booking`, `PaymentConfirmation`. **`TOOLS_BY_PHASE` + `tool_names_for_phase()` are the phase gate**. `save_interview_slots()` **overwrites, never appends** |
+| `agent/state.py` | `Phase` (6), `InterviewState`, `SessionState`, `RankedRecommendation`, `Booking`, `PaymentConfirmation`. **`TOOLS_BY_PHASE` + `tool_names_for_phase()` are the phase gate** (Phase C1 rewrote it — read the comment above the table, all three changes are load-bearing). `save_interview_slots()` **overwrites, never appends**. **All five phase transitions live here** and each emits its own OTel span via `_traced` |
 | `agent/graph.py` | (a) M1's minimal `build_graph()`/`compiled_graph()` persistence scaffold — **keep as-is**. (b) `TOOL_REGISTRY` (name→tool), `tools_for_phase()`, `build_agent_for_phase()`, **`PhaseAgentRegistry(checkpointer, extra_tools=)`**, **`resolve_registry()`** (returns a new dict; never mutates `TOOL_REGISTRY`), `CarMatchmakerState(DeepAgentState)` carrying `session: dict` |
-| `agent/tools.py` | `save_interview_state` and **`select_listing`** — `@tool`s returning a LangGraph `Command` |
+| `agent/tools.py` | `save_interview_state`, **`select_listing`**, and the Phase C1 factories **`build_booking_tools`** / **`build_research_tools`** / **`build_runtime_tools`**. All `@tool`s returning a LangGraph `Command`. The factories exist because the raw booking MCP tools must never enter the registry — read the comment before "simplifying" them into module-level tools |
 | `agent/prompts.py` | `PHASE_SYSTEM_PROMPTS` (a missing entry fails at startup). Listing-facing phases embed `UNTRUSTED_DATA_RULE` |
-| `agent/mcp_client.py` | **T024**: `discover_marketplace_tools()` — fail-soft MCP discovery, returns `[]` rather than raising. Never touches `TOOL_REGISTRY` |
+| `agent/mcp_client.py` | **T024/T033**: `discover_marketplace_tools()` + **`discover_booking_tools()`** — fail-soft MCP discovery, returns `[]` rather than raising. Never touches `TOOL_REGISTRY`. Plus **`call_structured()`**, the artifact-channel helper backend code uses to call an MCP tool directly. Two separate lists on purpose (see `EXPECTED_BOOKING_TOOLS`) |
 | `agent/ranking.py` | **T025**: deterministic `rank()` over tool-artifact records. Min-max normalised *within the slate*; `reasoning` is a template filled from record fields, never the `description` |
 | `agent/research.py` | **T025**: `run_research()` — code-driven first search from persisted interview state, AS2 relaxation ladder, `narration_brief()` for the model. Phase F added `original_query` (the model cannot say what changed if shown only the result) and the closing `CRITICAL` disclosure block — both from defects T021 caught live, see §3 |
 | `agent/llm.py` | `build_model()` selects by `LLM_PROVIDER`. **`DEFAULT_MAX_TOKENS_BY_PROVIDER`** (google 4096 / openai_compatible 1024) and **`DEFAULT_MAX_RETRIES_BY_PROVIDER`** (google 2 / openai_compatible 6), each with an env override (`LLM_MAX_TOKENS`, `LLM_MAX_RETRIES`) |
 | `agent/render_a2ui.py` | **A2UI v0.9.** Three surfaces, each `_init()` (createSurface + tree + data) / `_update()` (data only): interview, **reasoning** and **catalogue** (T026). Plus `_display()` (enum/float traps), `ICON_PATHS`/`icon()` (inline SVG, §8.21d) and `STEP_KIND_ICONS`. Every surface's root component **must** have id `root` (§8.21c) |
 | `api/main.py` | FastAPI. `GET /health`, `WS /ws/{session_id}`. **AsyncSqliteSaver lifespan, `agent.ainvoke`, `aget_state`**, `message_text()`. **`_SurfaceStream`** owns per-connection init-vs-update for all three A2UI surfaces; a resumed session with `recommendations` gets its catalogue re-emitted on connect |
 | `observability/otel_setup.py` | `setup_observability()` → `phoenix.otel.register(..., protocol="grpc", auto_instrument=True)` |
+| `observability/spans.py` | **Phase C1**: `record_phase_transition()`. `auto_instrument` only traces things inside a graph *run*, and two transitions happen outside one. Called from `SessionState`, not from callers — see §3's last block |
 | `conftest.py` | Puts the service root on `sys.path` so the suite collects under a bare `pytest`, not only `python -m pytest`. Added by the Phase C audit — see §3 |
 | `conftest.py` (gate) | Also holds **`LLM_CREDENTIALS_PRESENT`**, the single source of truth for the live-LLM gate. Must stay there: `api/main.py`'s import-time `load_dotenv()` pollutes `os.environ`, so any `skipif` computed inside a test module is order-dependent (§3) |
 | `tests/support_live.py` | Phase F shared fixtures: probe/relaxation routes, `scripted_search_tool` (a real `StructuredTool` shaped like the MCP adapter), the U+202F-aware `dollar_amounts`, `grounded_numbers`, and `pace_live_turn`. Not collected (`support_*`) |
-| `tests/` | **19 modules, 163 tests** (+`test_prompt_injection` 9 = T029, `test_relaxation_messaging` 5 = T021, `test_live_prose_helpers` 20)<br>previously **16 modules, 129 tests** (+`test_select_listing` 21 = T028b)<br>previously **15 modules, 106 tests** (+`test_catalogue_grounding` 24 = T022)<br>previously **14 modules, 82 tests** (`test_ranking` 12, `test_research` 17, `test_mcp_wiring` 8)<br>and before that **11 modules, 45 tests**: `test_state`(6), `test_tools`(5), `test_graph_persistence`(2), `test_render_a2ui`(8), `test_chat_endpoint`(3), `test_chat_endpoint_error_handling`(1), `test_interview_agent`(1), `test_otel_setup`(1), `test_phase_gate`(10), `test_observability_wiring`(2), `test_message_text`(6) |
+| `tests/` | **23 modules, 193 tests**. Phase C1 added `test_booking_gate.py` (8 = T030), `test_booking_state.py` (10), `test_refine_search.py` (8), `test_phase_spans.py` (4)<br>previously **19 modules, 163 tests** (+`test_prompt_injection` 9 = T029, `test_relaxation_messaging` 5 = T021, `test_live_prose_helpers` 20)<br>previously **16 modules, 129 tests** (+`test_select_listing` 21 = T028b)<br>previously **15 modules, 106 tests** (+`test_catalogue_grounding` 24 = T022)<br>previously **14 modules, 82 tests** (`test_ranking` 12, `test_research` 17, `test_mcp_wiring` 8)<br>and before that **11 modules, 45 tests**: `test_state`(6), `test_tools`(5), `test_graph_persistence`(2), `test_render_a2ui`(8), `test_chat_endpoint`(3), `test_chat_endpoint_error_handling`(1), `test_interview_agent`(1), `test_otel_setup`(1), `test_phase_gate`(10), `test_observability_wiring`(2), `test_message_text`(6) |
 
 ### mcp-services (Python) — **rewritten in M3 Phase B**
 | File | Purpose |
@@ -636,11 +703,12 @@ python mcp-services/data/generate_listings.py
 | `tests/test_marketplace_server.py` | **9 tests** — MCP tool contract (structured_content shape, untrusted wrapper, error path) |
 | `conftest.py` | Same role as agent-backend's. Replaced the per-file `sys.path.insert` hacks in two test modules, which had left `test_generate_listings` broken |
 | `app.py` | **M4a Phase A**: `compose()` mounts marketplace at `/mcp` (unchanged) and booking at `/booking/mcp` in one process. A FastMCP instance's session manager is **single-use per process**, and Starlette does **not** run a mounted app's lifespan — both traps are documented in the file and pinned by tests |
-| `booking/store.py` | **M4a Phase A**: `FIELDS` allowlist (Principle III enforcement point), `normalise()`, `validate()` (returns *all* errors), `new_booking_id()` |
+| `booking/store.py` | **M4a Phase A**: `FIELDS` allowlist (Principle III enforcement point), `normalise()`, `validate()` (returns *all* errors), `new_booking_id()`. **Phase C1**: `validate(fields, available_from=, today=)` also rejects past pickup dates and pickups before the car exists |
 | `booking/server.py` | **M4a Phase A**: `open_booking_form` + `submit_booking`, the `ui://booking/form.html` resource (`text/html;profile=mcp-app`, deny-by-default CSP in `_meta.ui.csp`), `/health`. `LISTING_DISPLAY_FIELDS` strips `description` |
-| `booking/static/form.html` | **M4a Phase B**: the committed single-file bundle (277,722 bytes). Build artifact — regenerate from `mcp-apps-ui/booking-form/`, nothing detects staleness (§14 finding 7) |
-| `tests/test_booking.py` | **20 tests** — validation rules, allowlist, Principle III |
-| `tests/test_booking_server.py` | **24 tests** — MCP App wire metadata, the two-server mount, the committed bundle's guards |
+| `booking/static/form.html` | **M4a Phase B**: the committed single-file bundle. Build artifact — regenerate from `mcp-apps-ui/booking-form/`. **Staleness IS detected since Phase C1** via the manifest below |
+| `booking/static/form.build.json` | **Phase C1**: SHA-256 of each bundle source + of the bundle. `test_booking_server.py` recomputes it and fails on drift (§14 finding 7). Committed alongside the bundle |
+| `tests/test_booking.py` | **26 tests** — validation rules, allowlist, Principle III, and (Phase C1) the pickup-date rules |
+| `tests/test_booking_server.py` | **26 tests** — MCP App wire metadata, the two-server mount, the committed bundle's guards, and (Phase C1) the source-manifest staleness guard |
 | `payment/` | Empty dir (M4b) |
 | `app_stub.py` | **DELETED** in Phase B |
 
@@ -937,8 +1005,16 @@ Full text in `.specify/memory/constitution.md`.
    **Re-run T029 if the model is ever changed again** — that is the whole
    reason this caveat exists.*
 5. **Full Observability** — every LLM call, tool call, and phase transition
-   emits an OTel span. *Genuinely wired since M2.5; re-verified after the async
-   migration (16 spans for one 2-turn session).*
+   emits an OTel span. *LLM and tool calls: genuinely wired since M2.5,
+   re-verified after the async migration (16 spans for one 2-turn session).
+   **Phase transitions: only since M4a Phase C1** — this row overclaimed
+   for three milestones. Nothing emitted a span explicitly, so transitions
+   outside a graph run (the catalogue click, and now the App bridge) were
+   invisible. `SessionState` now emits `phase.transition` itself, carrying
+   `phase.from`/`phase.to`/`phase.trigger`, from beside the mutation rather
+   than from the callers. **Verified in a running Phoenix**, not just at
+   the SDK: a four-transition session produced exactly four spans with the
+   right attributes. See §3's last block.*
 
 ---
 
@@ -962,46 +1038,95 @@ tests found real defects in shipped code, and the fixes changed
 | Retry budget for Groq's TPM bursts | `agent/llm.py` (`DEFAULT_MAX_RETRIES_BY_PROVIDER`) |
 | A working live-test gate | `agent-backend/conftest.py` (`LLM_CREDENTIALS_PRESENT`) |
 
-### Immediate next: M4a **Phase C** — backend wiring + the §14 audit fixes
+### What Phase C1 shipped (2026-08-09)
 
-⚠️ **This section's original "start M4a here" guidance is now history.**
-Phases A and B are done (§12b). **Start at Phase C, and start by reading
-§14** — the audit found four latent defects that Phase C would otherwise
-ship, and two of them are in the very tools Phase C is about to bind.
+**All twelve §14 findings are fixed** — see that section's table, which now
+carries the fix beside each finding. Beyond them:
+
+| Produced by Phase C1 | Where |
+|---|---|
+| The corrected gate table, with its three changes explained inline | `agent/state.py::TOOLS_BY_PHASE` |
+| Two new transitions — `refine_results` (the backwards one) and `submit_booking` — bringing the total to five, all in one module | `agent/state.py` |
+| `open_booking_form` with **no model-facing arguments**, and `refine_search`, both closures over discovered MCP tools | `agent/tools.py::build_booking_tools` / `build_research_tools` / `build_runtime_tools` |
+| Booking-server discovery kept **out** of `extra_tools`, plus `call_structured` | `agent/mcp_client.py` |
+| `booking_connected` in `/health`; the resumed-RESEARCHING double search removed; catalogue + reasoning re-rendered after a refinement | `api/main.py` |
+| A FORM_FILLING prompt of its own | `agent/prompts.py::FORM_FILLING_SYSTEM_PROMPT` |
+| Phase-transition spans (Principle V's third clause, first time true) | `observability/spans.py` + `SessionState._traced` |
+| Pickup-date sanity; `submit_booking(available_from=)` | `mcp-services/booking/store.py`, `server.py` |
+| Bundle staleness guard, source-hash manifest | `mcp-apps-ui/booking-form/scripts/install-bundle.mjs` → `booking/static/form.build.json` |
+| 38 new tests | `test_booking_gate.py` (8), `test_booking_state.py` (10), `test_refine_search.py` (8), `test_phase_spans.py` (4), `test_booking.py` (+6), `test_booking_server.py` (+2) |
+
+**Verified live, 22/22**, against a real uvicorn running `app:app` with real
+MCP clients — not stand-ins: discovery of both servers; the registry binding
+the wrapper rather than the raw tool; a real `run_research` slate; the form
+opened from the persisted record with `price`/`year`/`mileage` byte-identical
+and `description` stripped; `submit_booking` rejecting an incomplete
+submission with all three fields named, rejecting a pickup before
+availability, accepting a valid one and dropping a `card_number` at the
+allowlist; the AWAITING_PAYMENT transition; and `/health` reporting
+`booking_connected: true` (and `degraded` with the server down).
+
+### Immediate next: M4a **Phase C2** — the wire
 
 **Milestone order from here**: M4a → M4b → M4c → M5 (evals) → M6
 (hardening). The deck and video sit *after* all of that and are the user's
 to own — see the priority decision in §1.
 
-**Phase C's scope** (all backend, **no LLM spend needed**):
+**C2's scope** (backend only, still **no LLM spend needed**):
 
-1. **§14 findings 1–6 first.** Local `@tool` wrappers so the model never
-   retypes a listing; `submit_booking` **removed** from
-   `TOOLS_BY_PHASE[FORM_FILLING]` per the user's decision; booking discarded
-   on re-selection; `refine_search`; FORM_FILLING made reversible; its own
-   prompt.
-2. `SessionState.submit_booking()` — the **fourth** phase transition
-   (FORM_FILLING → AWAITING_PAYMENT), beside the existing three, so every
-   transition stays one code path in one module (Principle II).
-3. The `{"type": "mcp_app", ...}` WS envelope carrying the resource HTML +
-   the pre-fill payload, and the reverse channel for the App's
-   `tools/call`.
-4. **Code-driven kickoff**: opening the form when the phase becomes
-   FORM_FILLING, from *either* the catalogue button or the `select_listing`
-   tool — the same auto-kickoff shape `_run_research_turn` uses.
-5. `discover_marketplace_tools()` + `/health` extended to the booking server
-   (§14 finding 10).
-6. T030 + T031.
+1. **Read the `ui://` resource so the CSP survives.** 🔴 Measured in Phase
+   C1 and not yet acted on: `MultiServerMCPClient.get_resources()` converts
+   contents to a LangChain `Blob` with `metadata={"uri": ...}` and **drops
+   `_meta` entirely**. The CSP *does* survive the wire — `read_resource()`'s
+   `contents[0].meta` carries
+   `{"ui": {"csp": {"connectDomains": [], "resourceDomains": []}, ...}}` —
+   so use a raw `ClientSession.read_resource()`, not the adapter. Going
+   through `get_resources()` silently discards the deny-by-default
+   declaration spec.md US3 AS1 requires, and nothing fails: the form stays
+   locked down by its own `<meta>` tag, so US3 AS1 quietly degrades from a
+   protocol property to two hardcodings that happen to agree. Assert the
+   CSP **over the wire**, not against `FORM_RESOURCE_META` — the existing
+   test does the latter.
+2. **The outbound envelope.** `{"type": "mcp_app", ...}` carrying the
+   resource (uri, mimeType, html, meta) **and both** `toolInput` and
+   `toolResult`. Both, because ext-apps 1.7.5 states `sendToolInput` "is
+   sent exactly once and is **required before** `sendToolResult`".
+   ⚠️ `toolInput.arguments` for `open_booking_form` is *the listing record*
+   — send the **projected** one. `LISTING_DISPLAY_FIELDS` strips
+   `description` from the tool's **result**, not from its arguments, so
+   echoing the raw arguments would put attacker-controlled prose inside the
+   App document and defeat the server-side allowlist.
+3. **The reverse channel.** `{"type": "app_tool_call", call_id, name,
+   arguments}` → allowlisted to `submit_booking` in FORM_FILLING only (this
+   is the App-bridge gate, a different gate from the model's) → **substitute
+   `listing_id` and `available_from` from `selected_listing()`**, ignoring
+   the iframe's, → call the MCP tool → on `ok`, build a `Booking` and call
+   `SessionState.submit_booking()` → `_persist_session` → reply
+   `{"type": "app_tool_result", call_id, result}`.
+4. **Code-driven kickoff**, the `_run_research_turn` shape: on entering
+   FORM_FILLING from either route, when `booking_form_requests` exceeds
+   what this connection has sent, and on reconnect while in FORM_FILLING
+   (US5). `SessionState.booking_form_requests` exists for exactly this —
+   a tool inside a graph run cannot push to a WebSocket.
+5. **§14 recommendation 5** — the one audit item deliberately left: a
+   per-turn phase line in the model's context (`Phase: FORM_FILLING.
+   Selected: LST-0042. Form open, not submitted.`). Held back from C1
+   because it is a prompt change and C1 spent no LLM budget; §3 lesson 14
+   says prompt defects are ordering defects and are invisible until a real
+   turn runs. Do it where a live pass is happening anyway.
+6. T031's iframe half (Phase D), and a live pass over the three prompts C1
+   changed but never ran.
 
 Still true and still load-bearing:
 
 - **Pre-fill from `SessionState.selected_listing()`** — the verbatim record,
-  never model prose (Principle I). That method exists for exactly this.
+  never model prose (Principle I). C1's `open_booking_form` already does
+  this; C2 must not reintroduce a browser-supplied copy.
 - **MCP Apps render HTML in a sandboxed iframe** — a different surface from
   A2UI, deliberately (§1's resolved ambiguity). The A2UI catalogue stays the
   catalogue; the booking form is the iframe.
-- **Do not demo past the selection yet.** FORM_FILLING is reachable and
-  still binds nothing.
+- **Do not demo past the selection yet.** FORM_FILLING now has tools and a
+  prompt, but nothing appears on screen until Phase D.
 - **Budget the LLM quota first** (§5). 200k tokens/day, ~66 agent turns.
 
 **Phase D** is then `frontend/src/mcp-app-host/`: a `srcdoc` iframe with
@@ -1098,15 +1223,20 @@ see §5. Consequences for M4a onward:
   (`mcp-apps-ui/booking-form/` is **no longer** empty as of Phase B;
   `mcp-apps-ui/{checkout,listing-detail}/` and `mcp-services/payment/`
   still are.)
-- 🟠 **A stale `mcp-services/booking/static/form.html` ships silently**
-  (§14 finding 7). It is a committed build artifact with no guard tying it
-  to `mcp-apps-ui/booking-form/src/`. **Re-run the Phase B build after any
-  edit to that source** (§6); consider a source-hash manifest guard like the
-  one `listings.json` has.
-- 🟠 **`agent-backend` does not know the booking server exists yet.**
-  `discover_marketplace_tools()` connects only to `MCP_MARKETPLACE_URL` and
-  `/health`'s `mcp_connected` is computed from `search_listings` alone
-  (§14 finding 10). Phase C must extend both.
+- ✅ *(resolved in Phase C1)* **A stale `form.html` shipping silently**
+  (§14 finding 7). `install-bundle.mjs` now writes `form.build.json`, a
+  SHA-256 manifest of every source that feeds the bundle, and
+  `test_booking_server.py` recomputes it. **Still rebuild after any edit to
+  `mcp-apps-ui/booking-form/src/`** — the guard tells you the artifact is
+  stale, it does not refresh it. Worth knowing: the build is
+  **byte-deterministic**, measured, which is what makes the manifest a
+  sound proxy at all.
+- ✅ *(resolved in Phase C1)* **`agent-backend` now knows the booking server
+  exists.** `discover_booking_tools()` reads `MCP_BOOKING_URL`, `/health`
+  reports `booking_connected` separately from `mcp_connected`, and `status`
+  degrades on either. Both states verified live.
+  ⚠️ The discovered booking tools are held **outside** `extra_tools` on
+  purpose — see §3's tenth lesson before "tidying" that up.
 - ✅ *(resolved in Phase C)* `agent-backend/requirements.txt` now carries both
   `langchain-mcp-adapters` and `mcp>=1.24,<2` as real entries.
 - ✅ *(resolved in Phase E)* **`select_listing`** now exists as both a tool
@@ -1114,12 +1244,13 @@ see §5. Consequences for M4a onward:
   reachable, so M4a's `open_booking_form` has a precondition it can gate on.
 - ✅ *(resolved in Phase F)* **Principle IV's behavioural proof** — T029
   shows all three `ADV-*` probes inert on Groq. Gemini run still owed, above.
-- ⚠️ **FORM_FILLING is now reachable but has no tools yet.** Selecting a
-  listing advances the phase, and `TOOLS_BY_PHASE[FORM_FILLING]` names
-  `open_booking_form`/`submit_booking`, which M4a implements. Until then a
-  user who selects a car gets a confirmation and then an agent with no
-  domain tools. Correct per the gate, but it is a dead end until M4a — do
-  not demo past the selection yet.
+- ✅ *(resolved in Phase C1)* **FORM_FILLING has tools and a prompt.** It
+  binds `open_booking_form` (no model arguments), `select_listing` and
+  `refine_search`, and carries `FORM_FILLING_SYSTEM_PROMPT` rather than
+  sharing AWAITING_PAYMENT's. `submit_booking` is deliberately absent — App
+  bridge only.
+  ⚠️ **Still do not demo past the selection.** The agent can now open the
+  form; nothing puts it on screen until C2 + D.
 - 🟡 **The demo's headline path opens on a constraint relaxation unless you pick a late target date** (decision taken in Phase D — see below).
   §3b fixed the *price* floor so US2 AS1 matches 4 SUVs, but every real
   session also applies `target_date`, and **0** of those 4 are available
@@ -1253,6 +1384,16 @@ the **running image** answering both health routes with
 `form_bundle_present:true`; the bundle rendering in a real browser in both
 themes with no console errors.
 
+⚠️ **One clause of that was an overclaim, corrected in Phase C1.** "The
+running image answering both health routes" was true and *insufficient*: a
+`custom_route` bypasses FastMCP's transport-security middleware, so
+`/booking/health` answered `ok` from a container whose **MCP** endpoint
+returned `421` to every request the backend could make (§14 finding 13).
+The MCP mounts were only ever exercised over `127.0.0.1`, where the
+localhost allowlist happens to pass. **Health routes are not evidence about
+the protocol path** — they are served by different middleware, which is the
+whole reason the bug survived a Docker verification.
+
 **NOT yet verified, because it does not exist yet**: anything opening this
 form in the chat. That is Phases C and D.
 
@@ -1260,11 +1401,13 @@ form in the chat. That is Phases C and D.
 
 ## 13. Required reading
 
-For a new session, read in this order. **Re-tiered for M4a Phase C**
+For a new session, read in this order. **Re-tiered for M4a Phase C2**
 (2026-08-09). Earlier tierings are in git history.
 
-**Read §14 (the audit) and §12b (what A+B shipped) before writing any code.**
-They are the two sections that decide what Phase C does.
+**Read §10 (what C1 shipped + C2's scope) before writing any code.** §14 is
+now history rather than a worklist — all twelve findings are fixed — but
+read it anyway for the *shapes* of defect this codebase produces. §12b
+still describes the server and bundle C2 has to carry to the browser.
 
 **Tier 1 — orientation (always read, 6 files):**
 
@@ -1280,26 +1423,29 @@ They are the two sections that decide what Phase C does.
 
 **Tier 2 — what Phase C actually touches (5 files).** Read closely:
 
-7. `agent-backend/agent/state.py` — `Booking` (defined, still **unused**),
-   `TOOLS_BY_PHASE` (**must change in Phase C** — `submit_booking` comes out
-   per §14; `select_listing` goes into FORM_FILLING), `select_listing()`
-   (**must discard a stale booking** — §14 finding 3), and
-   **`selected_listing()`, the verbatim record the form pre-fills from**
-   (Principle I: never model prose). `submit_booking()` — the fourth phase
-   transition — is Phase C's to add
-8. `mcp-services/booking/server.py` + `store.py` — **already built** (§12b).
-   Read the tool signatures and note §14 findings 1–2 before binding either
-   to the model. `marketplace/server.py` remains the shape reference
+7. `agent-backend/agent/state.py` — all **five** transitions (C1 added
+   `refine_results` and `submit_booking`), the rewritten `TOOLS_BY_PHASE`
+   with its three load-bearing changes explained inline,
+   **`selected_listing()` — the verbatim record the form pre-fills from**
+   (Principle I: never model prose), and **`booking_form_requests`**, the
+   counter C2's kickoff reads
+8. `agent-backend/agent/tools.py` — **the file C2 leans on most.**
+   `build_booking_tools` is where `open_booking_form` becomes
+   argument-free, and its header comment is the one thing to read before
+   touching MCP tool wiring: injecting a raw MCP tool of the same name
+   silently beats a local one
 9. `agent-backend/api/main.py` — the WS contract (`chat`/`action` in,
-   `chat`/`a2ui`/`error` out), `_SurfaceStream`, `_handle_action`,
-   `_persist_session`, `_run_research_turn`. **`_handle_action` is the
-   precedent** for mutating state outside a graph run (§8.20c) and
-   **`_run_research_turn` is the precedent** for the code-driven kickoff.
-   Note `_handle_action` runs *before* the phase gate (§14 finding 5)
-10. `agent-backend/agent/tools.py` — `select_listing` is the **exact pattern**
-    Phase C's local booking-tool wrappers should copy: `@tool` +
-    `InjectedState`, returning a `Command`, rejecting bad input as a
-    `ToolMessage` rather than raising
+   `chat`/`a2ui`/`error` out; C2 adds `mcp_app` out and `app_tool_call` in),
+   `_SurfaceStream`, `_handle_action`, `_persist_session`,
+   `_run_research_turn`. **`_handle_action` is the precedent** for mutating
+   state outside a graph run (§8.20c) and **`_run_research_turn` is the
+   precedent** for the code-driven kickoff. Note `_handle_action` still
+   runs *before* the phase gate — that is now deliberate and matched by the
+   gate rather than a divergence
+10. `mcp-services/booking/server.py` + `store.py` — the resource, its
+    `_meta.ui.csp`, and `submit_booking(listing_id, fields, available_from)`.
+    **Read §10 item 1 before fetching the resource**: the adapter drops the
+    CSP
 11. `frontend/src/App.tsx` — the chat shell, the A2UI renderer and the
     `ActionListener`. `src/mcp-app-host/` is an **empty dir**; Phase D's
     iframe host goes there. The booking iframe renders **in the chat
@@ -1347,20 +1493,33 @@ bundle baked in; `.dockerignore` does not exclude `app.py` or
 
 ### Findings
 
-| # | Sev | Finding | Repro / evidence |
+> **✅ ALL TWELVE ARE FIXED as of Phase C1 (2026-08-09)** — and a
+> **thirteenth** was found while fixing them, by running `docker compose
+> up` rather than by reading anything. Row 13 is the most instructive one
+> in the table: it had shipped in Phase A, survived a Docker verification,
+> and would have presented in Phase D as "the form never opens" with a
+> green health check pointing the other way. Each was
+> re-reproduced before being fixed and re-checked after — the audit's own
+> repros were not taken on trust. Where the fix went is in the right-hand
+> column. Keep the table: it is the record of what the code used to do, and
+> §3's whole point is that corrections are recorded rather than quietly
+> edited away.
+
+| # | Sev | Finding | Fixed by (Phase C1) |
 |---|---|---|---|
-| 1 | 🔴 | **`open_booking_form` forces the model to retype the listing.** Schema is `{listing: object}`, **required** — the whole record. `TOOLS_BY_PHASE[FORM_FILLING]` names it as a *model* tool, so binding the MCP tool directly breaks Principle I by construction | `mcp.list_tools()` → `inputSchema.required == ["listing"]` |
-| 2 | 🔴 | **`submit_booking` bound to the model lets it invent the user's details.** `fields` is free-form; a model could produce a booking the user never made | same; `fields` is `{"type":"object","additionalProperties":true}` |
-| 3 | 🔴 | **Re-selecting leaves a stale booking.** With `booking.listing_id == "A"`, `select_listing("B")` moves the selection and leaves the booking untouched. spec.md Edge Cases requires the prior in-progress booking be **discarded, not silently merged** | reproduced in a scratch script against `SessionState` |
-| 4 | 🔴 | **Refining after results strands the user.** In RESULTS_READY the model can call `search_listings`, but **nothing writes `candidate_listings`** — only `_run_research_turn → record_research`, which fires only on RESEARCHING. So the model finds a car, describes it, the user says "that one", and `select_listing` rejects it | reproduced: `'LST-0099' is not in the current candidate slate (LST-0001, LST-0002)` |
-| 5 | 🟠 | **FORM_FILLING is a one-way door, and click ≠ prose.** The gate binds no `select_listing`/`search_listings` there, so "actually, the Kia" has no tool — but `_handle_action` runs **before** the agent and bypasses the gate, so clicking another card still works. Breaks Phase E's stated convergence guarantee | tool table + `api/main.py` control flow |
-| 6 | 🟠 | **`save_interview_state` is not bound in RESULTS_READY**, so a budget change after results cannot update interview state or the interview A2UI surface | `tool_names_for_phase(RESULTS_READY)` |
-| 7 | 🟠 | **A stale `form.html` ships silently.** Appended a marker to `src/main.ts`, ran the suite → **83 passed**, marker absent from the shipped bundle. `listings.json` has a real generator guard; the bundle guards check self-containment and handshake but never that the artifact matches its source | demonstrated, then reverted |
-| 8 | 🟡 | **Generic submit errors are attached to `full_name`.** In `main.ts` both the unexpected-response and network-failure branches set `errors = { full_name: … }`, so a transport failure highlights the name field and says something untrue about it | `mcp-apps-ui/booking-form/src/main.ts`, `onSubmit()` |
-| 9 | 🟡 | **No pickup-date sanity.** `store.validate` accepts a date in the past, and one **before** the car's `availability_date` — booking a pickup for a car that is not available yet, with the availability date right there in the record | `booking/store.py` |
-| 10 | 🟡 | **`/health` will misreport once booking is wired.** `mcp_connected` is computed from `search_listings` only, and `discover_marketplace_tools()` connects to the marketplace URL alone | `api/main.py`, `agent/mcp_client.py` |
-| 11 | 🟢 | **Latent Principle I rounding.** `money()` does `Math.round`. Harmless today (zero non-integral values measured) but would silently alter a price if the dataset gains a decimal | `main.ts` |
-| 12 | 🟢 | **Double search on a resumed RESEARCHING session.** The RESEARCHING agent runs (it has search tools), *then* `_run_research_turn` runs the code-driven search. Two searches; the model's is discarded | `api/main.py::chat_ws` |
+| 1 | 🔴 | **`open_booking_form` forces the model to retype the listing.** Schema is `{listing: object}`, **required** — the whole record. `TOOLS_BY_PHASE[FORM_FILLING]` names it as a *model* tool, so binding the MCP tool directly breaks Principle I by construction | ✅ `agent/tools.py::build_booking_tools` — a local `@tool` whose `tool_call_schema` has **no properties at all**; the record comes from `selected_listing()`. Pinned in `test_booking_gate.py`, verified live: the price the form receives is byte-identical to the persisted record |
+| 2 | 🔴 | **`submit_booking` bound to the model lets it invent the user's details.** `fields` is free-form; a model could produce a booking the user never made | ✅ Removed from `TOOLS_BY_PHASE` entirely, not left named-and-unbound. Asserted absent from the table **and** from every compiled agent |
+| 3 | 🔴 | **Re-selecting leaves a stale booking.** With `booking.listing_id == "A"`, `select_listing("B")` moves the selection and leaves the booking untouched. spec.md Edge Cases requires the prior in-progress booking be **discarded, not silently merged** | ✅ `SessionState.select_listing` drops a booking whose `listing_id` no longer matches — targeted, so re-confirming the *same* car keeps what the user typed |
+| 4 | 🔴 | **Refining after results strands the user.** In RESULTS_READY the model can call `search_listings`, but **nothing writes `candidate_listings`** — only `_run_research_turn → record_research`, which fires only on RESEARCHING. So the model finds a car, describes it, the user says "that one", and `select_listing` rejects it | ✅ `refine_search`: raw `search_listings` removed from RESULTS_READY and replaced by a tool that re-runs `run_research` and commits via `refine_results`. Test asserts the id that used to be refused is now selectable |
+| 5 | 🟠 | **FORM_FILLING is a one-way door, and click ≠ prose.** The gate binds no `select_listing`/`search_listings` there, so "actually, the Kia" has no tool — but `_handle_action` runs **before** the agent and bypasses the gate, so clicking another card still works. Breaks Phase E's stated convergence guarantee | ✅ `select_listing` + `refine_search` bound in FORM_FILLING, so the prose path can do what the click path always could. `refine_results` is the explicit backwards route |
+| 6 | 🟠 | **`save_interview_state` is not bound in RESULTS_READY**, so a budget change after results cannot update interview state or the interview A2UI surface | ✅ `save_interview_state` added to RESULTS_READY, and `refine_search` saves changed slots itself so the interview surface cannot go stale |
+| 7 | 🟠 | **A stale `form.html` ships silently.** Appended a marker to `src/main.ts`, ran the suite → **83 passed**, marker absent from the shipped bundle. `listings.json` has a real generator guard; the bundle guards check self-containment and handshake but never that the artifact matches its source | ✅ `install-bundle.mjs` writes `form.build.json` (SHA-256 per source); `test_booking_server.py` recomputes and fails on drift. Viable because the build is **byte-deterministic** — measured. Non-vacuity checked: appending a marker to `main.ts` turns the test red |
+| 8 | 🟡 | **Generic submit errors are attached to `full_name`.** In `main.ts` both the unexpected-response and network-failure branches set `errors = { full_name: … }`, so a transport failure highlights the name field and says something untrue about it | ✅ A separate `formError` banner in `main.ts`, rendered with `role="alert"`; neither branch writes to a field key any more |
+| 9 | 🟡 | **No pickup-date sanity.** `store.validate` accepts a date in the past, and one **before** the car's `availability_date` — booking a pickup for a car that is not available yet, with the availability date right there in the record | ✅ `store.validate(fields, available_from=, today=)` — past dates and pre-availability dates rejected, the message naming the date the user needs. `available_from` is **passed in**, never looked up: this server having its own copy of a listing value is the divergence Principle I forbids |
+| 10 | 🟡 | **`/health` will misreport once booking is wired.** `mcp_connected` is computed from `search_listings` only, and `discover_marketplace_tools()` connects to the marketplace URL alone | ✅ `discover_booking_tools()` + a separate `booking_connected` in `/health`. Deliberately **not** folded into `mcp_connected`, which every M0–M3 reader takes to mean the marketplace; `status` degrades on either. Verified live, both up and both down |
+| 11 | 🟢 | **Latent Principle I rounding.** `money()` does `Math.round`. Harmless today (zero non-integral values measured) but would silently alter a price if the dataset gains a decimal | ✅ `money()` no longer rounds; a fractional part is preserved and grouped around the decimal point |
+| 12 | 🟢 | **Double search on a resumed RESEARCHING session.** The RESEARCHING agent runs (it has search tools), *then* `_run_research_turn` runs the code-driven search. Two searches; the model's is discarded | ✅ `chat_ws` short-circuits a resumed RESEARCHING session straight into `_run_research_turn`, so the model no longer runs a search whose result nothing reads (~3k wasted tokens against a 200k/day budget) |
+| **13** | 🔴 | **Found in Phase C1 by `docker compose up`, not by the audit: the booking MCP server was unreachable from any other container.** FastMCP enables DNS-rebinding protection **by default** (`allowed_hosts = 127.0.0.1:*, localhost:*`) and answers **`421 Misdirected Request`** to anything else. The backend calls `http://mcp-services:8100/booking/mcp`, so **every** containerised MCP request to booking was rejected — while `GET /booking/health` kept answering `{"status":"ok"}`, because a `custom_route` bypasses that middleware. Marketplace was unaffected only by accident: passing `host="0.0.0.0"` makes FastMCP set `transport_security = None`, so a *binding* argument was silently deciding a *security* policy, and the two servers had opposite postures neither file mentioned | ✅ `transport_security` stated explicitly on **both** servers. Pinned two ways in `test_booking_server.py`: the setting, and a real request with `Host: mcp-services:8100` through throwaway servers showing the 421 appear on FastMCP's default and vanish on ours. Re-verified in Docker: `booking_connected: true`, `status: ok`, and a real `open_booking_form` call over the container network |
 
 ### Decisions taken by the user on this audit (2026-08-09)
 
@@ -1413,57 +1572,83 @@ unequal privileges, and only one updates state.**
 > FORM_FILLING works end to end.
 >
 > **M4a (the in-chat booking form as an MCP App, hard requirement #3) is
-> half done.** Phases A and B are committed and verified — the booking MCP
-> App server, the two-server mount, and the self-contained `ui://` form
-> bundle. **Nothing opens the form in the chat yet.**
+> three phases in.** A and B built the booking MCP App server and its
+> self-contained `ui://` form bundle. **C1 fixed all twelve findings of the
+> 2026-08-09 audit** and gave the agent a safe way to open the form: a
+> `open_booking_form` tool with **no model-facing arguments**, two new phase
+> transitions, `refine_search`, booking-server discovery, and
+> phase-transition spans. 22/22 live checks against the real two-server
+> process. **Nothing puts the form on a screen yet.**
 >
-> **Start at M4a Phase C, and start by reading §14 — the audit.** An audit
-> ran on 2026-08-09 after Phases A+B and found four *latent* defects that
-> Phase C would otherwise ship, two of them in the very tools Phase C is
-> about to bind. Every finding was reproduced, not inferred. §12b describes
-> exactly what A and B shipped; §10 lists Phase C's scope. Phase C needs
-> **no LLM spend**.
+> **Start at M4a Phase C2 — §10 has its scope.** §14 is now history rather
+> than a worklist (every finding carries its fix), but read it for the
+> *shapes* of defect this repo produces. C2 needs **no LLM spend** except
+> the live prompt pass noted below.
 >
-> Measured on 2026-08-09, not copied forward: **246 tests** — mcp-services
-> **83**, agent-backend **154 passed + 9 skipped** with no key. 237 need no
+> Measured 2026-08-09, not copied forward: **284 tests** — mcp-services
+> **91**, agent-backend **184 passed + 9 skipped** with no key. 275 need no
 > external setup. ⚠️ The *live* sweep has not been re-run since 2026-08-08
-> (it was 163/0 then); every test added since is unGated, so it should still
-> be 163/0, but that is an inference — re-run before claiming it.
+> (163/0 then); everything added since is ungated, so it should now be
+> 193/0 — an inference, not a measurement.
 >
 > Do **not** write code immediately. Confirm you have full context, tell me
-> anything that looks wrong, stale or self-contradictory, then design Phase C
-> and check it with me before implementing.
+> anything that looks wrong, stale or self-contradictory, then design Phase
+> C2 and check it with me before implementing.
 >
 > **Priority: build the product.** The slide deck (#13) and demo video (#14)
 > are deliberately last and are mine to own — don't spend session time on
 > them unless I ask.
 >
-> Read §3 carefully — it is the most valuable section in the repo. Seven
-> audits have run and each found a *different* shape of failure: docs
-> overclaiming, docs underclaiming, docs accurate but code defective, a doc
-> wrong about a *procedure* it recommended, tests finding four real defects
-> on their first live run, and most recently **latent defects in committed,
-> green, fully-tested code that nothing had wired up yet.** The constant is
-> not that documentation drifts — it is that **nobody ran it.** Check every
-> direction.
+> Read §3 carefully — it is the most valuable section in the repo. Eight
+> corrections now, each a *different* shape: docs overclaiming, docs
+> underclaiming, docs accurate but code defective, a doc wrong about a
+> *procedure* it recommended, tests finding four real defects on their first
+> live run, latent defects in committed green code nothing had wired up —
+> and most recently a false claim found not by an audit but by **fixing the
+> previous audit**, because the fix forced a sweep across code nobody had a
+> reason to reread. The constant is not that documentation drifts — it is
+> that **nobody ran it.** Check every direction.
+>
+> Three things C1 measured that C2 must act on:
+> - 🔴 **`MultiServerMCPClient.get_resources()` drops the resource `_meta`,
+>   including the CSP.** The declaration *does* survive the wire on
+>   `read_resource()`'s `contents[0].meta` — use a raw `ClientSession`.
+>   Going through the adapter silently discards what US3 AS1 requires and
+>   nothing fails.
+> - 🟠 **ext-apps 1.7.5 requires `sendToolInput` before `sendToolResult`**,
+>   and the tool *input* for `open_booking_form` is the listing record.
+>   `LISTING_DISPLAY_FIELDS` strips `description` from the **result**, not
+>   the arguments — send the projected record or untrusted marketplace prose
+>   lands inside the App document.
+> - 🟠 **The FORM_FILLING prompt is new and has never met a model.** Its
+>   content is unit-tested; its effect is not. §3 lesson 14: prompt defects
+>   are ordering defects, invisible until a real turn runs.
 >
 > Decisions already taken, do not re-litigate:
 > - **`submit_booking` is NOT model-callable** — iframe only, through the App
->   bridge. `TOOLS_BY_PHASE[FORM_FILLING]` must be corrected to match.
+>   bridge. Already removed from `TOOLS_BY_PHASE`; keep it out.
 > - The booking iframe renders **in the chat column**, not the surfaces panel.
 > - The booking server shares mcp-services' port under **`/booking/mcp`**;
->   marketplace stays at `/mcp` and needs no change.
-> - Opening the form is **code-driven** when the phase becomes FORM_FILLING,
->   with `open_booking_form` also bound so "show me the form again" works.
+>   marketplace stays at `/mcp`.
+> - Opening the form is **code-driven** when the phase becomes FORM_FILLING;
+>   `open_booking_form` is also bound so "show me the form again" works, and
+>   `SessionState.booking_form_requests` is the counter that carries it to
+>   the connection.
+> - A refinement or a re-selection **falls back to RESULTS_READY** and
+>   discards the in-progress booking (decided 2026-08-09).
 >
 > Carried-forward gotchas that each cost a cycle:
+> - **The raw booking MCP tools must never enter `extra_tools`.**
+>   `resolve_registry` resolves extras *over* the local registry, so they
+>   would silently replace the argument-free wrapper — same name, same
+>   phase, green suite. Measured. See §3's tenth lesson.
 > - **Pre-fill from `SessionState.selected_listing()`** — the verbatim tool
 >   record — never model prose (Principle I).
 > - **MCP Apps are iframes, not A2UI.** Deliberate — see §1's resolved
 >   architectural ambiguity before "fixing" it.
 > - **After ANY edit to `mcp-apps-ui/booking-form/src/`, rebuild the bundle**
->   (`npm run build` there). The committed `form.html` is a build artifact and
->   nothing detects that it is stale — demonstrated in §14 finding 7.
+>   (`npm run build` there) and commit `form.html` **and** `form.build.json`.
+>   Staleness is now *detected* (a test fails), not fixed for you.
 > - **Principle III applies from M4b on**: no card-like data in any DB row,
 >   log or OTel span. The booking form has no payment field by design.
 > - **Groq's binding limit is 200,000 tokens/day ≈ 66 agent turns**, and it is

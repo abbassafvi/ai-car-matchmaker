@@ -36,6 +36,13 @@ const entered: Record<string, string> = {};
 
 let payload: FormPayload = {};
 let errors: Record<string, string> = {};
+/** A failure that belongs to the submission, not to any one field — a
+ * transport error, or a response the server should not have sent. Kept
+ * separate from `errors` because both of these used to be written as
+ * `{ full_name: … }`, which highlighted the name input and told the user
+ * something untrue about it: "Could not reach the booking service" is not
+ * a problem with their name. */
+let formError: string | null = null;
 let submitting = false;
 let confirmation: { id: string } | null = null;
 
@@ -48,9 +55,20 @@ let confirmation: { id: string } | null = null;
  * extractor read "$25 000" as "25" because the model emitted U+202F
  * (HANDOFF §3). A deterministic separator keeps the rendered value
  * greppable and identical in every environment.
+ *
+ * It also does **not** round. It used to (`Math.round`), which was harmless
+ * against today's dataset — every price, mileage and rent value in all 203
+ * listings is an integer — and was still a Principle I bug waiting for the
+ * first decimal: a rendered value must be traceable *verbatim* to the tool
+ * record, and 24499.5 displayed as $24,500 is a number the marketplace
+ * never returned. Any fractional part is preserved instead.
  */
 function money(value: number): string {
-  return "$" + String(Math.round(value)).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+  const [whole, fraction] = String(value).split(".");
+  const negative = whole.startsWith("-");
+  const digits = negative ? whole.slice(1) : whole;
+  const grouped = digits.replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+  return `${negative ? "-" : ""}$${grouped}${fraction ? "." + fraction : ""}`;
 }
 
 function el<K extends keyof HTMLElementTagNameMap>(
@@ -182,6 +200,13 @@ function render(): void {
 
   if (payload.listing) card.append(renderVehicle(payload.listing));
 
+  if (formError) {
+    const banner = el("div", "summary", formError);
+    banner.setAttribute("role", "alert");
+    banner.dataset.formError = "true";
+    card.append(banner);
+  }
+
   const errorCount = Object.keys(errors).length;
   if (errorCount > 0) {
     card.append(
@@ -233,6 +258,7 @@ app.ontoolresult = (params) => {
   if (!structured) return;
   payload = structured;
   errors = {};
+  formError = null;
   render();
 };
 
@@ -240,6 +266,7 @@ async function onSubmit(): Promise<void> {
   if (submitting) return;
   submitting = true;
   errors = {};
+  formError = null;
   render();
 
   try {
@@ -263,10 +290,10 @@ async function onSubmit(): Promise<void> {
       // re-rendering shows the messages without losing anything typed.
       errors = out.errors as Record<string, string>;
     } else {
-      errors = { full_name: "Something went wrong submitting the form. Please try again." };
+      formError = "Something went wrong submitting the form. Please try again.";
     }
   } catch (cause) {
-    errors = { full_name: `Could not reach the booking service: ${String(cause)}` };
+    formError = `Could not reach the booking service: ${String(cause)}`;
   } finally {
     submitting = false;
     render();

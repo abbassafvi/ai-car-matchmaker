@@ -53,7 +53,10 @@ load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 
 from agent.graph import PhaseAgentRegistry  # noqa: E402
 from agent.llm import is_configured  # noqa: E402
-from agent.mcp_client import discover_marketplace_tools  # noqa: E402
+from agent.mcp_client import (  # noqa: E402
+    discover_booking_tools,
+    discover_marketplace_tools,
+)
 from agent.render_a2ui import (  # noqa: E402
     CATALOGUE_SURFACE_ID,
     INTERVIEW_SURFACE_ID,
@@ -68,6 +71,7 @@ from agent.render_a2ui import (  # noqa: E402
 )
 from agent.research import SEARCH_TOOL, narration_brief, run_research  # noqa: E402
 from agent.state import InterviewState, Phase, RankedRecommendation, SessionState  # noqa: E402
+from agent.tools import OPEN_BOOKING_FORM_TOOL, build_runtime_tools  # noqa: E402
 from observability.otel_setup import setup_observability  # noqa: E402
 
 log = logging.getLogger(__name__)
@@ -96,12 +100,23 @@ async def lifespan(app: FastAPI):
     except Exception as exc:  # pragma: no cover - depends on Phoenix availability
         log.warning("Tracing disabled -- could not register with Phoenix: %s", exc)
 
-    # T024: discover the marketplace tools once, here, because DeepAgents
-    # fixes an agent's tool set at construction -- the registry below cannot
-    # acquire them later. Fail-soft like tracing: an unreachable mcp-services
-    # degrades research rather than taking the backend down.
+    # T024/T033: discover both MCP servers' tools once, here, because
+    # DeepAgents fixes an agent's tool set at construction -- the registry
+    # below cannot acquire them later. Fail-soft like tracing: an
+    # unreachable mcp-services degrades research or booking rather than
+    # taking the backend down.
+    #
+    # ⚠️ The two lists are kept apart on purpose. Only `runtime_tools` goes
+    # to the registry: it carries the marketplace tools as-is plus *local
+    # wrappers* built over the booking ones. The raw booking tools must
+    # never be injected, because extras resolve over the local registry and
+    # the raw `open_booking_form` demands the whole listing record as model
+    # arguments -- see agent/tools.py::build_booking_tools.
     marketplace_tools = await discover_marketplace_tools()
+    booking_tools = await discover_booking_tools()
     app.state.marketplace_tools = marketplace_tools
+    app.state.booking_tools = booking_tools
+    runtime_tools = build_runtime_tools(marketplace_tools, booking_tools)
 
     Path(DB_PATH).parent.mkdir(parents=True, exist_ok=True)
     async with AsyncSqliteSaver.from_conn_string(DB_PATH) as checkpointer:
@@ -109,7 +124,7 @@ async def lifespan(app: FastAPI):
         # a readable error in the UI and a degraded /health, rather than the
         # container dying at startup with a stack trace.
         if is_configured():
-            app.state.agents = PhaseAgentRegistry(checkpointer, extra_tools=marketplace_tools)
+            app.state.agents = PhaseAgentRegistry(checkpointer, extra_tools=runtime_tools)
         else:
             app.state.agents = None
             log.warning("LLM_API_KEY not set -- starting in degraded mode, chat will not work.")
@@ -134,14 +149,24 @@ async def health():
     """
     configured = app.state.agents is not None
     tools = getattr(app.state, "marketplace_tools", []) or []
+    booking = getattr(app.state, "booking_tools", []) or []
     mcp_connected = any(tool.name == SEARCH_TOOL for tool in tools)
+    # Reported separately rather than folded into `mcp_connected`, which
+    # every M0-M3 caller and test reads as "the marketplace is reachable".
+    # Redefining it would have made an existing green signal quietly mean
+    # something else; a second field makes a booking outage its own,
+    # nameable cause. `status` degrades on either, so the composite still
+    # tells the truth (§14 finding 10).
+    booking_connected = any(tool.name == OPEN_BOOKING_FORM_TOOL for tool in booking)
     return {
-        "status": "ok" if (configured and mcp_connected) else "degraded",
+        "status": "ok" if (configured and mcp_connected and booking_connected) else "degraded",
         "service": "agent-backend",
         "llm_configured": configured,
         "tracing_enabled": getattr(app.state, "tracing_enabled", False),
         "mcp_connected": mcp_connected,
+        "booking_connected": booking_connected,
         "marketplace_tools": sorted(tool.name for tool in tools),
+        "booking_tools": sorted(tool.name for tool in booking),
     }
 
 
@@ -229,6 +254,39 @@ async def _send_catalogue(surfaces: _SurfaceStream, session: dict) -> None:
         lambda: build_catalogue_surface_init(listings, recommendations, interview, selected),
         lambda: build_catalogue_surface_update(listings, recommendations, interview, selected),
     )
+
+
+def _refine_artifact(messages) -> dict | None:
+    """The `refine_search` artifact from this turn, if the tool ran.
+
+    Read off `ToolMessage.artifact` -- the typed channel (§8.5) -- rather
+    than by re-deriving the reasoning steps here or, worse, parsing them out
+    of the model's reply. Scans backwards because only the most recent
+    refinement in a turn is current.
+    """
+    for message in reversed(messages):
+        artifact = getattr(message, "artifact", None)
+        if isinstance(artifact, dict) and "refine_search" in artifact:
+            return artifact["refine_search"]
+    return None
+
+
+async def _refresh_refined_surfaces(
+    surfaces: _SurfaceStream, session: dict, previous_slate: list[str], messages
+) -> None:
+    """Re-render the catalogue and reasoning trace after a refined search."""
+    if [listing["id"] for listing in session.get("candidate_listings") or []] == previous_slate:
+        return
+
+    refined = _refine_artifact(messages)
+    if refined:
+        steps, kinds = refined.get("steps") or [], refined.get("step_kinds") or []
+        await surfaces.send(
+            REASONING_SURFACE_ID,
+            lambda: build_reasoning_surface_init(steps, kinds),
+            lambda: build_reasoning_surface_update(steps, kinds),
+        )
+    await _send_catalogue(surfaces, session)
 
 
 async def _persist_session(agents, config, session: dict) -> None:
@@ -434,6 +492,32 @@ async def chat_ws(websocket: WebSocket, session_id: str):
                 await websocket.send_json({"type": "error", "message": LLM_UNCONFIGURED_MESSAGE})
                 continue
 
+            # A session already sitting in RESEARCHING skips the model turn
+            # entirely and goes straight to the code-driven search.
+            #
+            # Normally RESEARCHING is transient: `save_interview_slots`
+            # flips the phase mid-turn and `_run_research_turn` runs
+            # immediately below. But a session *resumed* in RESEARCHING (a
+            # reconnect, or a previous pass that errored) took the ordinary
+            # path here first -- and the RESEARCHING agent binds
+            # `search_listings`, so the model ran its own search, whose
+            # result nothing reads, before the real search ran underneath
+            # it. Two searches, one discarded, ~3k wasted tokens against a
+            # 200k/day budget, and a chat reply written about a slate the
+            # user was never shown (§14 finding 12).
+            if Phase(session["phase"]) == Phase.RESEARCHING:
+                try:
+                    session = await _run_research_turn(
+                        websocket, agents, session, config, surfaces
+                    )
+                except Exception:
+                    log.exception("Research turn failed for session %s", session_id)
+                    await websocket.send_json({
+                        "type": "error",
+                        "message": "I couldn't finish researching listings. Please try again.",
+                    })
+                continue
+
             # Phase gate (Constitution Principle II): the agent used for
             # this turn is the one built with only this phase's tools, so
             # out-of-phase tools are not merely discouraged -- they were
@@ -464,6 +548,7 @@ async def chat_ws(websocket: WebSocket, session_id: str):
                 })
                 continue
 
+            previous_slate = [listing["id"] for listing in session.get("candidate_listings") or []]
             session = result["session"]
 
             await websocket.send_json({
@@ -475,6 +560,15 @@ async def chat_ws(websocket: WebSocket, session_id: str):
                 lambda: build_interview_surface_init(InterviewState(**session["interview"])),
                 lambda: build_interview_surface_update(InterviewState(**session["interview"])),
             )
+
+            # `refine_search` replaces the slate from inside the agent run,
+            # so the surfaces have to catch up or the user is left looking
+            # at cards for cars that are no longer selectable -- clicking
+            # one would be rejected by `select_listing`, which is the
+            # "agent looks broken" path this whole fix exists to remove.
+            # Compared rather than always re-sent so an ordinary question
+            # turn does not re-serialise the catalogue.
+            await _refresh_refined_surfaces(surfaces, session, previous_slate, result["messages"])
 
             # One inbound message can now produce several outbound ones: the
             # interview reply above, then a reasoning trace, a catalogue and

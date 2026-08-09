@@ -6,6 +6,8 @@ contract on top.
 """
 from __future__ import annotations
 
+from datetime import date
+
 import pytest
 
 from booking import store
@@ -109,3 +111,70 @@ def test_a_booking_id_does_not_embed_submitted_data():
     booking_id = store.new_booking_id().lower()
     for value in VALID.values():
         assert value.lower() not in booking_id
+
+
+# --- pickup-date sanity (M4a Phase C audit, finding 9) --------------------
+#
+# `validate` used to accept any parseable date. So the form took a pickup
+# in the past, and -- worse for a demo -- a pickup *before* the car was
+# available, with the availability date printed three rows above the input
+# on the same screen. Neither is a security problem; both make the product
+# look like it does not read the record it is showing.
+
+
+def test_a_pickup_date_in_the_past_is_rejected():
+    errors = store.validate(
+        {**VALID, "pickup_date": "2026-08-08"}, today=date(2026, 8, 9)
+    )
+    assert "past" in errors["pickup_date"]
+
+
+def test_today_is_an_acceptable_pickup_date():
+    """The boundary, pinned: "not in the past" must not quietly mean
+    "strictly after today" and reject a same-day pickup.
+    """
+    assert store.validate(
+        {**VALID, "pickup_date": "2026-08-09"}, today=date(2026, 8, 9)
+    ) == {}
+
+
+def test_a_pickup_before_the_car_is_available_is_rejected():
+    errors = store.validate(
+        {**VALID, "pickup_date": "2026-09-01"},
+        available_from="2026-09-18",
+        today=date(2026, 8, 9),
+    )
+    # The message names the date the user needs, rather than telling them
+    # they are wrong and making them go and find it.
+    assert "2026-09-18" in errors["pickup_date"]
+
+
+def test_the_availability_rule_does_not_run_without_an_availability_date():
+    """`available_from` is optional because this server never looks a
+    listing up -- a second source of listing values is exactly what
+    Principle I's grounding channel exists to avoid. Omitted, the rule is
+    simply skipped rather than guessed at.
+    """
+    assert store.validate(
+        {**VALID, "pickup_date": "2026-09-01"}, today=date(2026, 8, 9)
+    ) == {}
+
+
+def test_an_unparseable_pickup_date_reports_only_the_format_problem():
+    """One message per field, and the right one: a date that could not be
+    parsed must not also be accused of being in the past.
+    """
+    errors = store.validate(
+        {**VALID, "pickup_date": "next tuesday"},
+        available_from="2026-09-18",
+        today=date(2026, 8, 9),
+    )
+    assert errors["pickup_date"] == "Enter a pickup date as YYYY-MM-DD."
+
+
+def test_a_valid_pickup_on_the_availability_date_itself_is_accepted():
+    assert store.validate(
+        {**VALID, "pickup_date": "2026-09-18"},
+        available_from="2026-09-18",
+        today=date(2026, 8, 9),
+    ) == {}

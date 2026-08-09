@@ -367,6 +367,14 @@ out of the sweep in minutes, having survived five audits that were each
 looking somewhere else. When a task makes you visit every `X`, read every
 `X`.
 
+**Twelfth lesson: a fake that is easier than the real thing tests the
+fake.** Every `_persist_session` test used a `FakeAgent` whose
+`aupdate_state` was three lines of dict assignment. They proved the handler
+*calls* it with the right arguments and could not, even in principle, show
+that the real call succeeds — and the real one raises on the second
+consecutive write. The fake did not even have the same signature. When a
+collaborator is stubbed, one test somewhere must use the real one.
+
 **Eleventh lesson: a health route is not evidence about the protocol
 path.** `GET /booking/health` answered `{"status":"ok"}` from a container
 whose MCP endpoint `421`-ed every request the backend could make, because
@@ -1501,9 +1509,9 @@ bundle baked in; `.dockerignore` does not exclude `app.py` or
 
 ### Findings
 
-> **✅ ALL TWELVE ARE FIXED as of Phase C1 (2026-08-09)** — and a
-> **thirteenth** was found while fixing them, by running `docker compose
-> up` rather than by reading anything. Row 13 is the most instructive one
+> **✅ ALL TWELVE ARE FIXED as of Phase C1 (2026-08-09)** — and rows
+> **13–15** were found while fixing them, by *running* the thing: 13 by
+> `docker compose up`, 14 and 15 by clicking cards in a browser. Row 13 is the most instructive one
 > in the table: it had shipped in Phase A, survived a Docker verification,
 > and would have presented in Phase D as "the form never opens" with a
 > green health check pointing the other way. Each was
@@ -1528,6 +1536,8 @@ bundle baked in; `.dockerignore` does not exclude `app.py` or
 | 11 | 🟢 | **Latent Principle I rounding.** `money()` does `Math.round`. Harmless today (zero non-integral values measured) but would silently alter a price if the dataset gains a decimal | ✅ `money()` no longer rounds; a fractional part is preserved and grouped around the decimal point |
 | 12 | 🟢 | **Double search on a resumed RESEARCHING session.** The RESEARCHING agent runs (it has search tools), *then* `_run_research_turn` runs the code-driven search. Two searches; the model's is discarded | ✅ `chat_ws` short-circuits a resumed RESEARCHING session straight into `_run_research_turn`, so the model no longer runs a search whose result nothing reads (~3k wasted tokens against a 200k/day budget) |
 | **13** | 🔴 | **Found in Phase C1 by `docker compose up`, not by the audit: the booking MCP server was unreachable from any other container.** FastMCP enables DNS-rebinding protection **by default** (`allowed_hosts = 127.0.0.1:*, localhost:*`) and answers **`421 Misdirected Request`** to anything else. The backend calls `http://mcp-services:8100/booking/mcp`, so **every** containerised MCP request to booking was rejected — while `GET /booking/health` kept answering `{"status":"ok"}`, because a `custom_route` bypasses that middleware. Marketplace was unaffected only by accident: passing `host="0.0.0.0"` makes FastMCP set `transport_security = None`, so a *binding* argument was silently deciding a *security* policy, and the two servers had opposite postures neither file mentioned | ✅ `transport_security` stated explicitly on **both** servers. Pinned two ways in `test_booking_server.py`: the setting, and a real request with `Host: mcp-services:8100` through throwaway servers showing the 421 appear on FastMCP's default and vanish on ours. Re-verified in Docker: `booking_connected: true`, `status: ok`, and a real `open_booking_form` call over the container network |
+| **14** | 🔴 | **Found in Phase C1 by clicking a second card: the WebSocket died.** `_persist_session` called `aupdate_state(config, {...})` with no `as_node`. LangGraph infers the attribution from the last write on the thread, so the **first** click after a model turn works — which is why Phase E's manual check passed — but two updates in a row with no run between them leave nothing to infer from and the second raises `InvalidUpdateError: Ambiguous update, specify as_node`. Re-selection is precisely the path finding 5 turned into a supported route. Worse, `chat_ws` had **no handler around the action branch** (chat and research turns both had one), so the exception killed the connection: the page went dead with no error, no reconnect, nothing in the chat log. **Every unit test passed** — they all persist through a `FakeAgent` whose `aupdate_state` is three lines of dict assignment, so none of them ever executed LangGraph's | ✅ `as_node="__start__"` (an external injection — `model`/`tools` also work and would both make the trace assert something untrue about the value's origin). Action branch now degrades like the other two. New test drives a **real** compiled graph + real checkpointer and clicks twice; the two `FakeAgent`s were given the real signature so they cannot drift again. Verified in a browser: two clicks, both confirmed in chat, socket still connected, `LST-0035` persisted and re-rendering as "✓ Selected" after a reload, two spans in Phoenix |
+| **15** | 🟡 | **A page reload printed a full traceback every time.** `chat_ws`'s initial surface push sat *outside* its `try`, so a browser closing the old socket mid-push raced into an unhandled `WebSocketDisconnect`. Harmless, and that is the problem — a log that cries wolf on the most ordinary action in development is one nobody reads when something real happens | ✅ Initial push moved inside the handler. Verified: two consecutive reloads, `preview_logs --level error` → "No server errors found" |
 
 ### Decisions taken by the user on this audit (2026-08-09)
 

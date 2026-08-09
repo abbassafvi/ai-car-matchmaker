@@ -304,10 +304,31 @@ async def _persist_session(agents, config, session: dict) -> None:
     run. It is a no-op when no agent exists (no LLM key), which leaves the
     selection in-memory for that session only -- acceptable, since a
     keyless deployment cannot progress to booking anyway.
+
+    **`as_node` is required, and omitting it was a live bug.** LangGraph
+    infers which node an external update should be attributed to from the
+    last thing that wrote to the thread. After a graph run that is
+    unambiguous, so the first click after a model turn worked -- which is
+    why Phase E's manual verification passed and why every unit test here
+    passed against a `FakeAgent` that never ran LangGraph at all. But two
+    updates in a row with no run between them leave nothing to infer from,
+    and the second raises `InvalidUpdateError: Ambiguous update, specify
+    as_node`. That is a **second consecutive catalogue click** -- exactly
+    the re-selection path M4a Phase C1 turned into a supported route --
+    and it killed the WebSocket, because `chat_ws` had no handler around
+    the action branch. Found by clicking two cards in a browser.
+
+    `__start__` rather than `model` or `tools`: this is an external input
+    to the thread, not something the model or a tool produced. Both of
+    those also happen to work, and both would make the trace assert
+    something untrue about where the value came from (Principle V -- the
+    trace is the audit log).
     """
     if agents is None:
         return
-    await agents.for_phase(Phase.INTERVIEWING).aupdate_state(config, {"session": session})
+    await agents.for_phase(Phase.INTERVIEWING).aupdate_state(
+        config, {"session": session}, as_node="__start__",
+    )
 
 
 async def _handle_action(
@@ -451,27 +472,36 @@ async def chat_ws(websocket: WebSocket, session_id: str):
     session = await _load_session(agents, config, session_id)
     surfaces = _SurfaceStream(websocket)
 
-    # Full component tree on every connect -- a freshly loaded frontend has
-    # no prior tree to apply incremental updates to, whether this is a
-    # brand-new session or a resumed one (US5).
-    await surfaces.send(
-        INTERVIEW_SURFACE_ID,
-        lambda: build_interview_surface_init(InterviewState(**session["interview"])),
-        lambda: build_interview_surface_update(InterviewState(**session["interview"])),
-    )
-
-    # A resumed session that already has a ranked slate gets its catalogue
-    # back immediately, rebuilt from `SessionState.candidate_listings`.
-    # Without this, reconnecting to a RESULTS_READY session would show an
-    # empty panel despite the records being persisted -- which is the exact
-    # symptom tasks.md T025(iii) persisted them to prevent, and which no
-    # doc had assigned to a task. The reasoning trace is deliberately not
-    # replayed: steps describe one search as it happened and are not
-    # persisted, whereas the slate is durable state.
-    if session.get("recommendations"):
-        await _send_catalogue(surfaces, session)
-
+    # The initial push is inside the same `try` as the message loop, not
+    # before it. A browser reload closes the old socket while the backend
+    # is still writing these, and with the sends outside the handler that
+    # raced into an unhandled `WebSocketDisconnect` -- a full traceback in
+    # the log on every single refresh. Nothing was wrong, which is the
+    # problem: a log that cries wolf on the most ordinary action in
+    # development is a log nobody reads when something real happens (the
+    # same argument as §8.32's quota-skip).
     try:
+        # Full component tree on every connect -- a freshly loaded frontend
+        # has no prior tree to apply incremental updates to, whether this is
+        # a brand-new session or a resumed one (US5).
+        await surfaces.send(
+            INTERVIEW_SURFACE_ID,
+            lambda: build_interview_surface_init(InterviewState(**session["interview"])),
+            lambda: build_interview_surface_update(InterviewState(**session["interview"])),
+        )
+
+        # A resumed session that already has a ranked slate gets its
+        # catalogue back immediately, rebuilt from
+        # `SessionState.candidate_listings`. Without this, reconnecting to a
+        # RESULTS_READY session would show an empty panel despite the
+        # records being persisted -- the exact symptom tasks.md T025(iii)
+        # persisted them to prevent, and which no doc had assigned to a
+        # task. The reasoning trace is deliberately not replayed: steps
+        # describe one search as it happened and are not persisted, whereas
+        # the slate is durable state.
+        if session.get("recommendations"):
+            await _send_catalogue(surfaces, session)
+
         while True:
             incoming = await websocket.receive_json()
 
@@ -480,9 +510,25 @@ async def chat_ws(websocket: WebSocket, session_id: str):
             # guard below -- a user can still pick a listing from the
             # catalogue of a resumed session when no key is configured.
             if incoming.get("type") == "action":
-                session = await _handle_action(
-                    websocket, incoming, session, surfaces, agents, config
-                )
+                try:
+                    session = await _handle_action(
+                        websocket, incoming, session, surfaces, agents, config
+                    )
+                except Exception:
+                    # Same contract the chat and research turns already had,
+                    # and the action branch did not: a failure explains
+                    # itself and leaves the connection usable. It was the
+                    # only inbound branch that could take the socket down,
+                    # which is how a persistence bug presented as the whole
+                    # UI going dead with nothing in the chat log -- no
+                    # error, no reconnect, the page simply stopped
+                    # responding to clicks. `session` keeps its previous
+                    # value, so a failed action cannot half-apply.
+                    log.exception("UI action failed for session %s", session_id)
+                    await websocket.send_json({
+                        "type": "error",
+                        "message": "Something went wrong applying that. Please try again.",
+                    })
                 continue
 
             if incoming.get("type") != "chat" or not incoming.get("content"):

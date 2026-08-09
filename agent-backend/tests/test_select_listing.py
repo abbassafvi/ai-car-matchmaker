@@ -294,9 +294,10 @@ async def test_a_click_is_written_to_the_checkpointer_not_just_returned():
     recorded = {}
 
     class FakeAgent:
-        async def aupdate_state(self, config, values):
+        async def aupdate_state(self, config, values, as_node=None):
             recorded["config"] = config
             recorded["session"] = values["session"]
+            recorded["as_node"] = as_node
 
         async def aget_state(self, config):
             class Snapshot:
@@ -320,6 +321,12 @@ async def test_a_click_is_written_to_the_checkpointer_not_just_returned():
     assert recorded["session"]["selected_listing_id"] == "LST-0002"
     assert recorded["session"]["phase"] == "FORM_FILLING"
     assert recorded["config"] is config
+    # Without this LangGraph cannot attribute the write and the *second*
+    # consecutive click raises -- see
+    # test_two_clicks_in_a_row_survive_a_real_checkpointer, which is the
+    # test that actually caught it. Pinned here too so the fake cannot
+    # drift back to a signature the real method does not have.
+    assert recorded["as_node"] == "__start__"
 
     # And a fresh load sees it, which is what a reconnect does.
     reloaded = await _load_session(agents, config, "t1")
@@ -331,7 +338,7 @@ async def test_a_rejected_click_is_not_persisted():
     persisted = []
 
     class FakeAgent:
-        async def aupdate_state(self, config, values):
+        async def aupdate_state(self, config, values, as_node=None):
             persisted.append(values)
 
     class FakeAgents:
@@ -368,3 +375,110 @@ async def test_an_unknown_action_name_is_ignored_not_obeyed():
     )
     assert session["selected_listing_id"] is None
     assert socket.sent == []
+
+
+@pytest.mark.asyncio
+async def test_the_click_path_emits_a_phase_transition_span(monkeypatch):
+    """Principle V for the route that had none.
+
+    Spans in this project come from `auto_instrument` patching LangChain,
+    so they only exist for work done inside a graph *run*. A catalogue
+    click is not a run -- `_handle_action` mutates state and writes it with
+    `aupdate_state` -- so from Phase E until M4a Phase C1 this transition
+    was completely untraced while Principle V's row read PASS.
+
+    Asserted here rather than only in `test_booking_state.py` because that
+    file calls `SessionState` directly. This one goes through the handler a
+    browser click actually reaches, which is the path that was broken; the
+    two would not fail together if someone routed the click around the
+    state method.
+    """
+    # Built *before* the patch: the fixture reaches RESULTS_READY through
+    # `record_research`, which is itself a transition and would otherwise
+    # land in `emitted` and make the assertion below about setup rather
+    # than about the click.
+    session = results_ready_session()
+
+    emitted = []
+    monkeypatch.setattr(
+        "agent.state.record_phase_transition",
+        lambda session_id, from_phase, to_phase, trigger: emitted.append(
+            (from_phase, to_phase, trigger)
+        ),
+    )
+
+    await _dispatch(session, "select_listing", {"listing_id": "LST-0002"})
+
+    assert emitted == [("RESULTS_READY", "FORM_FILLING", "select_listing")]
+
+
+@pytest.mark.asyncio
+async def test_a_rejected_click_emits_no_span(monkeypatch):
+    """A span per *attempt* would make the trace lie about what happened."""
+    session = results_ready_session()  # see the note above
+
+    emitted = []
+    monkeypatch.setattr(
+        "agent.state.record_phase_transition",
+        lambda *a: emitted.append(a),
+    )
+
+    await _dispatch(session, "select_listing", {"listing_id": "LST-9999"})
+
+    assert emitted == []
+
+
+@pytest.mark.asyncio
+async def test_two_clicks_in_a_row_survive_a_real_checkpointer():
+    """The bug every other test in this file was structurally unable to see.
+
+    They all persist through a `FakeAgent` whose `aupdate_state` is three
+    lines of dict assignment, so they prove `_handle_action` *calls* it with
+    the right arguments and nothing about whether the real call works.
+    LangGraph's does not always: it infers which node an external update
+    belongs to from the last write on the thread, and with no graph run
+    between two updates there is nothing to infer from, so the **second**
+    one raises `InvalidUpdateError: Ambiguous update, specify as_node`.
+
+    One click after a model turn is fine, which is why this survived Phase
+    E's manual verification and M4a Phase C1's whole test suite. Two clicks
+    in a row is the re-selection path C1 deliberately turned into a
+    supported route (§14 finding 5), and it took the WebSocket down.
+
+    So this test uses the **real** compiled agent and a real checkpointer,
+    and clicks twice. `model=None` is fine because `aupdate_state` never
+    runs the model -- the graph only has to be real enough to have nodes.
+    """
+    from langgraph.checkpoint.memory import InMemorySaver
+
+    from agent.graph import build_agent_for_phase
+    from agent.state import Phase as P
+    from api.main import _SurfaceStream, _handle_action, _load_session
+
+    agent = build_agent_for_phase(P.INTERVIEWING, InMemorySaver(), model=None)
+
+    class RealAgents:
+        extra_tools = []
+
+        def for_phase(self, phase):
+            return agent
+
+    agents, config = RealAgents(), {"configurable": {"thread_id": "two-clicks"}}
+    socket = FakeSocket()
+    surfaces = _SurfaceStream(socket)
+    session = results_ready_session().model_dump(mode="json")
+
+    for listing_id in ("LST-0002", "LST-0001"):
+        session = await _handle_action(
+            socket, {"type": "action", "name": "select_listing",
+                     "context": {"listing_id": listing_id}},
+            session, surfaces, agents, config,
+        )
+
+    assert session["selected_listing_id"] == "LST-0001"
+    assert not socket.of_type("error"), socket.of_type("error")
+
+    # And what a reconnect reads back is the *second* choice, not the first.
+    reloaded = await _load_session(agents, config, "two-clicks")
+    assert reloaded["selected_listing_id"] == "LST-0001"
+    assert reloaded["phase"] == "FORM_FILLING"

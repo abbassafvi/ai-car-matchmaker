@@ -28,11 +28,12 @@ cd frontend && npm run dev
 | `LLM_PROVIDER` | `openai_compatible` | Groq via OpenAI-compat |
 | `LLM_MODEL` | `openai/gpt-oss-120b` | Primary |
 | `LLM_BASE_URL` | `https://api.groq.com/openai/v1` | |
-| `LLM_FALLBACK_PROVIDER` | `google` | Gemini fallback |
-| `LLM_FALLBACK_MODEL` | `gemini-3.6-flash` | |
-| `LLM_FALLBACK_API_KEY` | (see `.env`) | Second Gemini key |
+| `LLM_FALLBACK_PROVIDER` | `openai_compatible` | Different Groq model |
+| `LLM_FALLBACK_MODEL` | `llama-3.3-70b-versatile` | Separate per-model TPD |
+| `LLM_FALLBACK_BASE_URL` | `https://api.groq.com/openai/v1` | Same Groq endpoint |
+| `LLM_FALLBACK_API_KEY` | (same as primary) | Same Groq key |
 
-The `FallbackModel` class (`agent/llm.py`) wraps primary + fallback and retries on 429/403. Different Groq models have separate per-model quotas (200k TPD each).
+The `FallbackModel` class (`agent/llm.py`) wraps primary + fallback and retries on 429/403. Both models are `openai_compatible` so `bind_tools` works identically. Different Groq models have separate per-model quotas (200k TPD each).
 
 **To switch to Gemini-only for demo:**
 ```env
@@ -130,7 +131,7 @@ Run all: `source .venv/bin/activate && python -m pytest agent-backend/tests/ mcp
 ## Known Issues / TODO
 
 1. **Groq quota** — 200k TPD per model. Fallback to Gemini configured but unverified. Wait ~17min for quota reset, or switch to Gemini-only for demo.
-2. **Gemini fallback unverified** — The second Gemini key in `.env` was supplied but not tested. Try it before relying on it.
+2. **Gemini fallback deprecated** — Gemini's `bind_tools` doesn't work with LangGraph (`NotImplementedError`). Fallback now uses `llama-3.3-70b-versatile` (different Groq model, separate quota).
 3. **No `onSurfaceUpdated`** in A2UI processor — Drawer auto-open tracks fingerprint (surface IDs + component counts) as a workaround.
 4. **T027 (multi-session load test)** — Deferred, optional.
 5. **T050 (owner-owned)** — Deferred.

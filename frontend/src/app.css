@@ -397,3 +397,69 @@
      before the first one arrives. */
   min-height: 12rem;
 }
+
+/* --- header actions --------------------------------------------------- */
+
+.chat-header-right {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+/* "Start over" — CONFIRMED binds no tools and no transition leaves it, so
+   without this the app is a dead end after a successful checkout and the
+   only way to run a second demo is to clear site data. */
+.chat-restart {
+  border: 1px solid #d3dae2;
+  background: #ffffff;
+  color: #5d6f79;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 5px 10px;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+
+.chat-restart:hover {
+  background: #f1f4f8;
+  color: #1c2024;
+}
+
+.chat-restart:focus-visible,
+.chat-chip:focus-visible,
+.drawer-close:focus-visible,
+.drawer-toggle:focus-visible {
+  outline: 2px solid #2563eb;
+  outline-offset: 2px;
+}
+
+/* Markdown rendered from model output (see renderMarkdown in App.tsx).
+   Each source line becomes its own block so "- item" lists read as lists
+   rather than as one run-on paragraph. */
+.chat-line {
+  display: block;
+}
+
+.chat-line:empty {
+  height: 0.5em;
+}
+
+.chat-line--bullet {
+  padding-left: 1.1em;
+  position: relative;
+}
+
+.chat-line--bullet::before {
+  content: "•";
+  position: absolute;
+  left: 0.25em;
+  opacity: 0.55;
+}
+
+/* The booking/checkout App is the active task when it is on screen, so it
+   sits above the drawer's backdrop rather than under it. The drawer also
+   closes itself when an App arrives; this is the belt to that braces. */
+.mcp-app {
+  z-index: 160;
+}

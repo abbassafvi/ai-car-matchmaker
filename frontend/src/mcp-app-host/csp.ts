@@ -81,9 +81,25 @@ export function buildCsp(declaration: CspDeclaration | undefined): string {
     // spec's documented default for an omitted baseUriDomains.
     `base-uri ${base && base.length > 0 ? base.join(" ") : "'self'"}`,
     "form-action 'none'",
-    // Belt and braces with the sandbox attribute: an App must never be able
-    // to frame, or break out into, the page hosting it.
-    "frame-ancestors 'none'",
+    // ⚠️ `frame-ancestors` is deliberately absent, and its absence is the
+    // honest state rather than a gap.
+    //
+    // It used to be listed here, on a belt-and-braces argument about an App
+    // never framing the page that hosts it. But this policy is delivered as
+    // a `<meta http-equiv>` tag, and the CSP spec says `frame-ancestors` is
+    // ignored in meta-delivered policies -- Chromium says so out loud, once
+    // per App load: "The Content Security Policy directive 'frame-ancestors'
+    // is ignored when delivered via a <meta> element." So the directive was
+    // never enforcing anything; it was a comment that looked like a control,
+    // and it was the only thing keeping the e2e suite's zero-console-errors
+    // assertion red.
+    //
+    // What actually provides the guarantee is the sandbox attribute in
+    // McpAppFrame (`APP_SANDBOX` below withholds `allow-same-origin`), which
+    // gives the document an opaque origin -- it cannot reach this page, its
+    // storage, or its DOM. Re-adding this line would restore the warning
+    // without restoring any protection; enforcing it for real needs a
+    // response header, which a `srcdoc` document has no room for.
   ].join("; ");
 }
 

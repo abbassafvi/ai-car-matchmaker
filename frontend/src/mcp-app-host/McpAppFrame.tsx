@@ -151,6 +151,7 @@ export default function McpAppFrame({ envelope, onCallTool, onCancel }: Props) {
       // order rather than fired together, because "sent exactly once and
       // required before" is about arrival order, not call order.
       void (async () => {
+        try {
         await bridge.sendToolInput(envelope.toolInput);
         // `content` is required by the MCP CallToolResult shape; the App
         // reads `structuredContent`, which is the typed channel, so an
@@ -159,6 +160,15 @@ export default function McpAppFrame({ envelope, onCallTool, onCancel }: Props) {
         // envelope to what is actually consumed.
         if (!closed) {
           await bridge.sendToolResult({ content: [], ...envelope.toolResult });
+        }
+        } catch (err) {
+          // A reload tears the socket down while these are in flight, so
+          // both reject with "not connected" and, fired bare with `void`,
+          // surfaced as two unhandled rejections on every page load that
+          // had an App mounted. There is nothing to recover here -- the
+          // bridge is being replaced -- but an uncaught rejection is noise
+          // in the console the e2e suite asserts is empty.
+          if (!closed) console.warn("MCP App bridge handshake aborted:", err);
         }
       })();
     };

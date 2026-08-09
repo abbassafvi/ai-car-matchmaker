@@ -17,8 +17,14 @@ import time
 from dataclasses import asdict
 from pathlib import Path
 
-# Add parent dir to path for imports
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+# The `agent` package lives in agent-backend/, not at the repo root, so the
+# old single insert made every persona die with "No module named 'agent'" --
+# an error the runner then swallowed into result["error"] and reported as a
+# tidy scorecard of 0.00. Both paths are needed: the root for `eval.personas`
+# and agent-backend/ for `agent.*`.
+REPO_ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(REPO_ROOT))
+sys.path.insert(0, str(REPO_ROOT / "agent-backend"))
 
 from eval.personas import PERSONAS, Persona, get_persona_by_id
 
@@ -108,6 +114,24 @@ def run_persona_eval(persona: Persona, verbose: bool = False) -> dict:
         # Import here to avoid circular imports and allow graceful degradation
         from agent.graph import compiled_graph, new_session_state
         from langgraph.checkpoint.memory import MemorySaver
+
+        # ⚠️ `compiled_graph` is the M0 placeholder: one node, `_touch`, which
+        # returns state unchanged. No model, no tools, and a `GraphState` with
+        # no `messages` key -- so the persona's turns below are discarded and
+        # `interview_slots` / `candidate_listings` are empty whatever the
+        # agent would really have done. Every persona therefore scored 0.00,
+        # and the summary printed that as if it were a measurement.
+        #
+        # Refusing is the honest state until this is pointed at the real
+        # per-phase agents (`PhaseAgentRegistry` + `run_research`, the path
+        # `api/main.py` takes). A harness that cannot measure must not
+        # produce a number that looks like a measurement.
+        raise NotImplementedError(
+            "eval/runner.py still drives agent.graph.compiled_graph -- the M0 "
+            "placeholder graph, which has no model and no tools. Every score "
+            "it produces is 0.00 by construction. Point it at "
+            "PhaseAgentRegistry/run_research before trusting any output."
+        )
 
         checkpointer = MemorySaver()
         app = compiled_graph(checkpointer)
@@ -210,11 +234,25 @@ def main():
 
     print_summary(results)
 
+    # A scoring harness that cannot run must not look like a run that scored
+    # zero. Anything that errored is a broken harness, not a failing agent,
+    # and the exit code has to say which.
+    broken = [r for r in results if r["error"]]
+    if broken:
+        print(
+            f"\n{len(broken)} persona(s) did not execute -- these are harness "
+            f"errors, not agent scores. The averages above are meaningless.",
+            file=sys.stderr,
+        )
+
     if args.export:
         output_path = "eval/results.json"
         with open(output_path, "w") as f:
             json.dump(results, f, indent=2)
         print(f"\nResults exported to {output_path}")
+
+    if broken:
+        sys.exit(1)
 
 
 if __name__ == "__main__":

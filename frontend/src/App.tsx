@@ -14,6 +14,28 @@ import "./a2ui-theme.css";
 
 type ChatMessage = { role: "user" | "assistant"; content: string };
 
+// The model reliably emits **bold** and "- " bullets; the bubble used to
+// render `{content}` as a plain string, so users read `- **Budget max:**
+// $30,000` verbatim. Built as React nodes rather than by setting innerHTML:
+// this text is model output and, one prompt-injection away, third-party
+// listing prose, so it must never be parsed as markup.
+function renderMarkdown(text: string) {
+  return text.split("\n").map((line, i) => {
+    const bullet = /^\s*[-*]\s+/.test(line);
+    const body = bullet ? line.replace(/^\s*[-*]\s+/, "") : line;
+    const parts = body.split(/(\*\*[^*]+\*\*)/g).filter(Boolean).map((part, j) =>
+      part.startsWith("**") && part.endsWith("**") && part.length > 4
+        ? <strong key={j}>{part.slice(2, -2)}</strong>
+        : <span key={j}>{part}</span>,
+    );
+    return (
+      <span key={i} className={bullet ? "chat-line chat-line--bullet" : "chat-line"}>
+        {parts}
+      </span>
+    );
+  });
+}
+
 function getSessionId(): string {
   const key = "car-matchmaker-session-id";
   let id = localStorage.getItem(key);
@@ -140,9 +162,20 @@ export default function App() {
         } else if (data.type === "a2ui") {
           processor.processMessages(data.messages);
         } else if (data.type === "error") {
+          // The backend now clears typing before every error, but the client
+          // clears it here too: an error bubble under three bouncing dots
+          // says "failed" and "still working" at the same time, and this is
+          // the one place that is cheap to make unconditional.
+          setTyping(false);
           setMessages((prev) => [...prev, { role: "assistant", content: `⚠️ ${data.message}` }]);
         } else if (data.type === "mcp_app") {
           setMcpApp(data as McpAppEnvelope);
+          // The drawer auto-opens when results arrive and renders a
+          // full-viewport backdrop above the chat column, so the booking
+          // form landed *underneath* it: the user's first click on the form
+          // was spent dismissing the drawer instead. The form is the task
+          // now, so the results panel steps aside for it.
+          setDrawerOpen(false);
         } else if (data.type === "app_tool_result") {
           const pending = pendingCalls.current.get(data.call_id);
           if (pending) {
@@ -184,11 +217,26 @@ export default function App() {
       }));
     });
 
-  const send = () => {
-    if (!input.trim() || !wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
-    wsRef.current.send(JSON.stringify({ type: "chat", content: input }));
-    setMessages((prev) => [...prev, { role: "user", content: input }]);
+  const sendText = (text: string) => {
+    const trimmed = text.trim();
+    if (!trimmed || !wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
+    wsRef.current.send(JSON.stringify({ type: "chat", content: trimmed }));
+    setMessages((prev) => [...prev, { role: "user", content: trimmed }]);
     setInput("");
+  };
+
+  // The chips used to call `setInput` only: the empty state says "pick a
+  // suggestion", nothing was sent, and focus stayed on the chip -- so
+  // pressing Enter re-fired the chip rather than sending, and a
+  // keyboard-only user could not start a conversation from them at all.
+  const send = () => sendText(input);
+
+  // Start over. CONFIRMED binds no tools and no transition leaves it, and
+  // the session id is permanent in localStorage, so after a successful
+  // checkout the only way to run the flow again was to clear site data.
+  const startOver = () => {
+    localStorage.removeItem("car-matchmaker-session-id");
+    window.location.reload();
   };
 
   const surfaces = rawSurfaces.filter((s) => s.id !== "interview-progress");
@@ -235,13 +283,20 @@ export default function App() {
       <div className="chat">
         <div className="chat-header">
           <h1 className="chat-title">AI Car Matchmaker</h1>
-          <span
-            className="chat-status"
-            data-connected={connected}
-            data-testid="connection-status"
-          >
-            {connected ? "connected" : "offline"}
-          </span>
+          <div className="chat-header-right">
+            <span
+              className="chat-status"
+              data-connected={connected}
+              data-testid="connection-status"
+            >
+              {connected ? "connected" : "offline"}
+            </span>
+            {messages.length > 0 && (
+              <button className="chat-restart" onClick={startOver} data-testid="start-over">
+                Start over
+              </button>
+            )}
+          </div>
         </div>
 
         <div className="chat-log" data-testid="chat-log" ref={logRef}>
@@ -260,7 +315,7 @@ export default function App() {
                   <button
                     key={chip}
                     className="chat-chip"
-                    onClick={() => { setInput(chip); }}
+                    onClick={() => sendText(chip)}
                   >
                     {chip}
                   </button>
@@ -270,7 +325,9 @@ export default function App() {
           )}
           {messages.map((m, i) => (
             <div key={i} className="chat-row" data-role={m.role}>
-              <span className="chat-bubble">{m.content}</span>
+              <span className="chat-bubble">
+                {m.role === "assistant" ? renderMarkdown(m.content) : m.content}
+              </span>
             </div>
           ))}
           {typing && (
@@ -330,7 +387,10 @@ export default function App() {
       )}
 
       {/* Slide-out drawer */}
-      <div className={`drawer ${drawerOpen ? "drawer--open" : ""}`}>
+      {/* `inert` when closed: the drawer is hidden with a transform only,
+          so without this its "Choose this one" buttons stay focusable and
+          screen-reader-visible while sitting off-screen at x=837. */}
+      <div className={`drawer ${drawerOpen ? "drawer--open" : ""}`} inert={!drawerOpen}>
         <div className="drawer-header">
           <h2 className="drawer-title">Results</h2>
           <button
@@ -341,7 +401,7 @@ export default function App() {
             {"\u2715"}
           </button>
         </div>
-        <div className="drawer-body">
+        <div className="drawer-body" data-testid="a2ui-panel">
           {surfaces.map((surface) => (
             <div key={surface.id} className="a2ui-surface" data-surface-id={surface.id}>
               <A2uiSurface surface={surface} />

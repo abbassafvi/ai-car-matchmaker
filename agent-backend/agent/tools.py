@@ -25,6 +25,57 @@ from langgraph.types import Command
 
 from agent.state import SessionState
 
+# What users say, mapped onto the three values `TransactionType` accepts.
+#
+# `transaction_type` is a strict enum, so anything else raised
+# `ValidationError` straight out of this tool -- and a tool that raises
+# aborts the whole agent turn (the model never sees the exception), which
+# the user meets as "Something went wrong processing that message." The
+# reachable triggers were not exotic: "I want to lease a car" produced
+# `lease`, and a capitalised `Buy` was enough on its own.
+#
+# Financing and leasing are genuinely not supported by the marketplace
+# (a listing is `buy`, `rent` or `both`), so they are mapped to their
+# nearest honest neighbour and the model is told to say so -- see the
+# unmapped branch in `_coerce_transaction_type`.
+_TRANSACTION_SYNONYMS = {
+    "buy": "buy", "purchase": "buy", "purchasing": "buy", "own": "buy",
+    "buying": "buy", "finance": "buy", "financing": "buy",
+    "rent": "rent", "rental": "rent", "renting": "rent", "hire": "rent",
+    "lease": "rent", "leasing": "rent", "subscription": "rent",
+    "both": "both", "either": "both", "any": "both",
+    "buy or rent": "both", "rent or buy": "both",
+}
+
+
+def _coerce_transaction_type(value: Optional[str]) -> tuple[Optional[str], Optional[str]]:
+    """`(value_to_store, note_for_the_model)`.
+
+    Returns the value unchanged when it is already one of the three, a
+    mapped value plus a note when it is a recognisable paraphrase, and
+    `(None, note)` when it is not recognisable at all -- leaving the slot
+    unset so the interview asks again, rather than storing a value that
+    would search for something the user did not ask for.
+    """
+    if value is None:
+        return None, None
+    key = str(value).strip().lower()
+    if key in ("buy", "rent", "both"):
+        return key, None
+    mapped = _TRANSACTION_SYNONYMS.get(key)
+    if mapped is None:
+        return None, (
+            f"'{value}' is not a transaction type this marketplace supports. "
+            "Ask the user whether they want to buy, rent, or are open to both."
+        )
+    if mapped != key:
+        return mapped, (
+            f"Recorded '{value}' as '{mapped}' — this marketplace only offers "
+            f"buy, rent, or both. Tell the user plainly that {value} is not "
+            f"available and that you are searching {mapped} listings instead."
+        )
+    return mapped, None
+
 
 @tool
 def save_interview_state(
@@ -50,18 +101,33 @@ def save_interview_state(
     transaction_type must be one of: buy, rent, both.
     """
     session = SessionState.model_validate(state["session"])
-    session.save_interview_slots(
-        use_case=use_case,
-        category=category,
-        budget_min=budget_min,
-        budget_max=budget_max,
-        transaction_type=transaction_type,
-        target_date=target_date,
-        location=location,
-    )
+    transaction_type, note = _coerce_transaction_type(transaction_type)
+    try:
+        session.save_interview_slots(
+            use_case=use_case,
+            category=category,
+            budget_min=budget_min,
+            budget_max=budget_max,
+            transaction_type=transaction_type,
+            target_date=target_date,
+            location=location,
+        )
+    except Exception as exc:
+        # A tool that raises aborts the turn and strands the user with a
+        # generic error, so anything the schema still refuses comes back as
+        # an ordinary ToolMessage the model can act on -- the same contract
+        # `select_listing` and `open_booking_form` already use.
+        return Command(update={"messages": [ToolMessage(
+            f"Could not save those details: {exc} Ask the user to restate the "
+            "value in plainer terms, then call this tool again.",
+            tool_call_id=tool_call_id,
+        )]})
     return Command(update={
         "session": session.model_dump(mode="json"),
-        "messages": [ToolMessage("Interview state saved.", tool_call_id=tool_call_id)],
+        "messages": [ToolMessage(
+            "Interview state saved." if note is None else f"Interview state saved. {note}",
+            tool_call_id=tool_call_id,
+        )],
     })
 
 
@@ -349,14 +415,25 @@ def build_research_tools(marketplace_tools: list) -> list:
         from agent.research import narration_brief, run_research
 
         session = SessionState.model_validate(state["session"])
-        session.save_interview_slots(
-            use_case=use_case,
-            category=category,
-            budget_min=budget_min,
-            budget_max=budget_max,
-            transaction_type=transaction_type,
-            target_date=target_date,
-        )
+        # Same coercion as `save_interview_state`, for the same reason: this
+        # is the second door into the same strict enum.
+        coerced, _note = _coerce_transaction_type(transaction_type)
+        try:
+            session.save_interview_slots(
+                use_case=use_case,
+                category=category,
+                budget_min=budget_min,
+                budget_max=budget_max,
+                transaction_type=coerced,
+                target_date=target_date,
+            )
+        except Exception as exc:
+            return Command(update={"messages": [ToolMessage(
+                f"Could not apply those changes: {exc} Ask the user to restate "
+                "what they want changed. The previous recommendations are "
+                "still on screen.",
+                tool_call_id=tool_call_id,
+            )]})
 
         outcome = await run_research(
             session.interview.model_dump(mode="json"), marketplace_tools

@@ -124,7 +124,11 @@ Each phase has a dedicated agent with only that phase's tools (Constitution Prin
 | mcp-services | 146 | |
 | **Total** | **415** | |
 
-Run all: `source .venv/bin/activate && python -m pytest agent-backend/tests/ mcp-services/tests/ -q`
+Run all: `source .venv/bin/activate && make test`
+
+The two suites must be separate invocations — both roots have a top-level
+`conftest.py`, so pointing one pytest run at both fails at collection.
+See `pytest.ini` for the detail.
 
 ---
 

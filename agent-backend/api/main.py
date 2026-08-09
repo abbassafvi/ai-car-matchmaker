@@ -182,34 +182,67 @@ def health_status(**signals: bool) -> str:
     return "ok" if all(signals[name] for name in HEALTH_SIGNALS) else "degraded"
 
 
+async def _reachable(path: str) -> bool:
+    """Is an mcp-services health route answering *right now*?
+
+    The tool lists below are captured once at startup, which makes every
+    connectivity flag a statement about the past. That is wrong in the
+    direction that matters: with mcp-services stopped, `/health` reported
+    `status: ok` and all three downstreams `true`, because the cached tool
+    objects still had the right names. `/health` is the first thing anyone
+    checks before a demo, so it has to answer about now.
+
+    Short timeout and fail-closed: a health check that hangs is worse than
+    one that says "degraded".
+    """
+    base = os.environ.get("MCP_SERVICES_HEALTH_BASE", "http://localhost:8100")
+    try:
+        import httpx
+
+        async with httpx.AsyncClient(timeout=1.5) as client:
+            response = await client.get(f"{base}{path}")
+        return response.status_code == 200
+    except Exception:
+        return False
+
+
 @app.get("/health")
 async def health():
     """Reports degraded (not failed) on a missing LLM key or an unreachable
     marketplace, so the container stays up and the cause is visible.
 
-    `mcp_connected` is reported for the same reason `tracing_enabled` is:
-    without it, a failed tool discovery presents to a user as "the agent
-    just never searches", which is indistinguishable from a logic bug. Note
-    that tool discovery happens once at startup and the per-phase agents
-    cache their tools, so a false here is not self-healing -- mcp-services
-    coming back up needs a backend restart to take effect.
+    Each connectivity flag is the conjunction of two different facts:
+    *the tool was discovered at startup* (so the agent can actually call it)
+    and *the server is answering now* (so the call would succeed). Either
+    alone tells a half-truth -- discovery alone survives the process dying,
+    and liveness alone would go green against a server whose tools we never
+    bound. Tool discovery still only happens at startup, so a downstream
+    that comes back up needs a backend restart before the agent can use it;
+    the difference is that `/health` now says so.
     """
     configured = app.state.agents is not None
     tools = getattr(app.state, "marketplace_tools", []) or []
     booking = getattr(app.state, "booking_tools", []) or []
     payment = getattr(app.state, "payment_tools", []) or []
-    mcp_connected = any(tool.name == SEARCH_TOOL for tool in tools)
+    marketplace_live = await _reachable("/health")
+    booking_live = await _reachable("/booking/health")
+    payment_live = await _reachable("/payment/health")
+    mcp_connected = marketplace_live and any(tool.name == SEARCH_TOOL for tool in tools)
     # Reported separately rather than folded into `mcp_connected`, which
     # every M0-M3 caller and test reads as "the marketplace is reachable".
     # Redefining it would have made an existing green signal quietly mean
     # something else; a second field makes a booking outage its own,
     # nameable cause. `status` degrades on either, so the composite still
     # tells the truth (§14 finding 10).
-    booking_connected = any(tool.name == OPEN_BOOKING_FORM_TOOL for tool in booking)
+    booking_connected = booking_live and any(
+        tool.name == OPEN_BOOKING_FORM_TOOL for tool in booking
+    )
     # A third field for the same reason there is a second: folding payment
     # into `booking_connected` would make one green signal mean two things,
     # and a checkout outage would present as "booking is broken".
-    payment_connected = any(tool.name == OPEN_MOCK_CHECKOUT_TOOL for tool in payment)
+    payment_connected = payment_live and any(
+        tool.name == OPEN_MOCK_CHECKOUT_TOOL for tool in payment
+    )
     return {
         "status": health_status(
             llm_configured=configured,
@@ -256,6 +289,22 @@ def message_text(message) -> str:
                 parts.append(block.get("text", ""))
         return "".join(parts)
     return str(content)
+
+
+async def send_error(websocket: WebSocket, message: str) -> None:
+    """Report a failed turn, and stop the typing indicator on the way out.
+
+    Every model turn opens with `{"typing": true}` and clears it after the
+    reply. The failure paths sent only the error, and the client's error
+    branch appends a message without touching `typing` -- so the one moment
+    the user most needs a clear signal, they got an error bubble with three
+    dots still bouncing underneath it, apparently still working.
+
+    Clearing it here rather than at each call site means a new error path
+    cannot forget: the two things always travel together.
+    """
+    await websocket.send_json({"type": "typing", "typing": False})
+    await websocket.send_json({"type": "error", "message": message})
 
 
 class _SurfaceStream:
@@ -646,10 +695,25 @@ async def _handle_action(
     """
     name = incoming.get("name")
 
+    # Same reload as the App bridge, for the same reason -- a click is a
+    # state mutation too, and two tabs share one thread id.
+    session = await _reload_session(agents, config, session)
+
     # --- cancel_selection: dismiss booking / checkout card ---------------
     if name == CANCEL_SELECTION_ACTION:
         state = SessionState.model_validate(session)
+        before = state.phase
         state.cancel_selection()
+        if state.phase == before:
+            # `cancel_selection` is a no-op outside FORM_FILLING and
+            # AWAITING_PAYMENT, but the confirmation used to be sent
+            # regardless -- so dismissing the *paid receipt* removed it from
+            # the screen and answered "selection cancelled, pick another car
+            # below" for a session that had cancelled nothing and, in
+            # CONFIRMED, cannot pick anything. Saying nothing is the honest
+            # answer: the card is already gone from the client's view.
+            log.info("cancel_selection ignored in phase %s", before.value)
+            return session
         session = state.model_dump(mode="json")
         await _persist_session(agents, config, session)
         await _send_catalogue(surfaces, session)
@@ -675,10 +739,7 @@ async def _handle_action(
         state.select_listing(listing_id)
     except ValueError as exc:
         log.warning("Rejected listing selection %r: %s", listing_id, exc)
-        await websocket.send_json({
-            "type": "error",
-            "message": "That listing is no longer available to select. Try searching again.",
-        })
+        await send_error(websocket, "That listing is no longer available to select. Try searching again.")
         return session
 
     session = state.model_dump(mode="json")
@@ -733,6 +794,25 @@ async def _handle_app_tool_call(
     - **which listing / booking.** Both are read from persisted state.
     """
     call_id = incoming.get("call_id")
+
+    # ⚠️ Re-read persisted state before mutating it, rather than trusting the
+    # copy this connection has been carrying since it opened.
+    #
+    # `chat_ws` caches `session` in a local and `_persist_session` writes back
+    # with no version check, so the last writer wins. That is fine while a
+    # session has exactly one connection -- and it does not, because the
+    # session id lives in `localStorage` and is therefore shared by every tab
+    # of the same browser. Two tabs on one session defeated *every* replay
+    # guard in `SessionState`: tab B submitted and paid, tab A (still holding
+    # a FORM_FILLING copy) submitted again and was accepted, its write rolled
+    # the checkpoint back from CONFIRMED to AWAITING_PAYMENT, and the next
+    # connection to read that state was handed a second checkout and paid for
+    # the same car twice. The guards were never wrong; they were reading a
+    # stale copy of the thing they guard.
+    #
+    # Reloading here makes those guards see the same state the checkpointer
+    # does, which is the only place the two tabs share.
+    session = await _reload_session(agents, config, session)
 
     async def reply(result: dict) -> None:
         await websocket.send_json({
@@ -943,13 +1023,50 @@ async def _run_research_turn(
         "content": message_text(result["messages"][-1]),
     })
 
-    # Catalogue is sent AFTER the narration chat message so the user reads
-    # "I found X listings..." before seeing the cards — otherwise the
-    # sidebar shows car cards before the explanation appears.
+    # Catalogue AFTER the narration, and this ordering is load-bearing in a
+    # way that is not obvious.
+    #
+    # The obvious reading is that it is about reading order -- "I found 4
+    # listings" should land before the cards it describes. Moving it earlier
+    # to cut the wait (the reasoning trace announces the top pick, then the
+    # user stares at an empty panel for the 30-45s the narration call takes)
+    # looks like a clear win, and it is not: this coroutine is *inside* the
+    # turn, so while `narrator.ainvoke` above is awaited, `chat_ws` is not
+    # back at `receive_json` and is not reading this socket. Cards on screen
+    # during that window are cards whose clicks are queued, not handled --
+    # the button does nothing for half a minute and then fires. A slow
+    # catalogue is a wait; a dead button is a bug.
+    #
+    # Fixing the latency properly means not blocking the receive loop on the
+    # narration (stream it, or run it as a task and let clicks land), which
+    # is a larger change than reordering two sends.
     if not outcome.error:
         await _send_catalogue(surfaces, session)
 
     return session
+
+
+async def _reload_session(agents, config, session: dict) -> dict:
+    """The persisted session, or `session` unchanged if nothing is stored yet.
+
+    Deliberately *not* `_load_session`, which substitutes a blank
+    SessionState when the thread has no checkpoint. Blanking is right at
+    connect time and wrong here: a mutation handler that fell back to an
+    empty state would throw away a slate the connection is holding and
+    reject the click that arrived with it. So an absent checkpoint means
+    "nothing newer than what I have", not "start over".
+    """
+    if agents is None or config is None:
+        return session
+    try:
+        snapshot = await agents.for_phase(Phase.INTERVIEWING).aget_state(config)
+        persisted = snapshot.values.get("session")
+    except Exception:
+        # A checkpointer read failure must not take the action down; the
+        # in-memory copy is still the best available answer.
+        log.exception("Could not re-read session %s", session.get("session_id"))
+        return session
+    return persisted or session
 
 
 async def _load_session(agents, config, session_id: str) -> dict:
@@ -1019,7 +1136,23 @@ async def chat_ws(websocket: WebSocket, session_id: str):
         await checkout_stream.maybe_open(payment_tools, session)
 
         while True:
-            incoming = await websocket.receive_json()
+            # `receive_json` raises on anything that is not JSON, and every
+            # `incoming.get(...)` below raises AttributeError on JSON that is
+            # not an object -- an array, `null`, a bare string or number.
+            # Neither was caught, so one malformed frame closed the socket
+            # with a 1006 and a traceback. The browser's backoff hides that
+            # in normal use, which is exactly why it would only ever be
+            # noticed while something else was already going wrong.
+            try:
+                incoming = await websocket.receive_json()
+            except WebSocketDisconnect:
+                raise
+            except Exception:
+                log.warning("Ignoring an unparseable frame on session %s", session_id)
+                continue
+            if not isinstance(incoming, dict):
+                log.warning("Ignoring a non-object frame on session %s", session_id)
+                continue
 
             # A2UI surface actions (button clicks) are applied in code and
             # need no LLM, so they are handled before the agent-required
@@ -1067,10 +1200,7 @@ async def chat_ws(websocket: WebSocket, session_id: str):
                     # responding to clicks. `session` keeps its previous
                     # value, so a failed action cannot half-apply.
                     log.exception("UI action failed for session %s", session_id)
-                    await websocket.send_json({
-                        "type": "error",
-                        "message": "Something went wrong applying that. Please try again.",
-                    })
+                    await send_error(websocket, "Something went wrong applying that. Please try again.")
                 # A click is one of the three routes into FORM_FILLING, and
                 # the form is opened in code rather than by asking the model
                 # to decide -- the same shape as the research auto-kickoff,
@@ -1107,10 +1237,7 @@ async def chat_ws(websocket: WebSocket, session_id: str):
                     )
                 except Exception:
                     log.exception("Research turn failed for session %s", session_id)
-                    await websocket.send_json({
-                        "type": "error",
-                        "message": "I couldn't finish researching listings. Please try again.",
-                    })
+                    await send_error(websocket, "I couldn't finish researching listings. Please try again.")
                 continue
 
             # Phase gate (Constitution Principle II): the agent used for
@@ -1150,10 +1277,7 @@ async def chat_ws(websocket: WebSocket, session_id: str):
                 # deliberately left untouched: a failed turn must not corrupt
                 # or partially apply state.
                 log.exception("Agent turn failed for session %s", session_id)
-                await websocket.send_json({
-                    "type": "error",
-                    "message": "Something went wrong processing that message. Please try again.",
-                })
+                await send_error(websocket, "Something went wrong processing that message. Please try again.")
                 continue
 
             before = (
@@ -1205,10 +1329,7 @@ async def chat_ws(websocket: WebSocket, session_id: str):
                     # itself and leaves the session usable. `session` keeps
                     # its pre-research value, so the next message retries.
                     log.exception("Research turn failed for session %s", session_id)
-                    await websocket.send_json({
-                        "type": "error",
-                        "message": "I couldn't finish researching listings. Please try again.",
-                    })
+                    await send_error(websocket, "I couldn't finish researching listings. Please try again.")
 
             # Last, after every model turn: the model may have called
             # `select_listing` ("I'll take the Jeep") or `open_booking_form`

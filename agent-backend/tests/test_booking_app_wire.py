@@ -456,10 +456,19 @@ def test_the_phase_line_is_built_from_state_never_from_prose():
     """Everything it asserts is a persisted value, so it cannot itself be
     a hallucination -- and it must not invent a selection that is absent.
     """
+    from datetime import date
+
     from agent.prompts import phase_context_line
 
     interviewing = phase_context_line({"phase": "INTERVIEWING"})
-    assert interviewing == "[Session state: Phase: INTERVIEWING.]"
+    # Phase first, then today's date -- the date is here because the
+    # interview prompt asks the model to resolve "next month" into a real
+    # ISO date and nothing else in the context says what month it is.
+    # Asserted as a whole string rather than by substring so an added fact
+    # has to be a deliberate edit here, which is the point of this test.
+    assert interviewing == (
+        f"[Session state: Phase: INTERVIEWING. Today: {date.today().isoformat()}.]"
+    )
 
     submitted = phase_context_line({
         "phase": "AWAITING_PAYMENT", "selected_listing_id": "LST-0042",

@@ -7,6 +7,8 @@ is needed there. The research/results prompts below carry the rule now
 because that is where listing descriptions first reach the model (M3).
 """
 
+from datetime import date
+
 from agent.state import Phase
 
 INTERVIEW_SYSTEM_PROMPT = """You are the AI Car Matchmaker, helping a user \
@@ -224,7 +226,15 @@ def phase_context_line(session: dict) -> str:
     (§8.12), so the cost is noise. It is built from persisted state, never
     from prose, so nothing it asserts can be a hallucination.
     """
-    parts = [f"Phase: {session.get('phase')}"]
+    # Today's date, first, because the interview prompt asks the model to
+    # turn "next month" into a YYYY-MM-DD and nothing anywhere told it what
+    # month it is. Asked for an example date in August 2026 the model
+    # offered "2024-09-01"; a target_date in the past matches zero listings,
+    # so the relaxation ladder drops the availability constraint and the
+    # user is told "none of the listings met your date requirement" -- a
+    # plausible sentence about a constraint the model hallucinated. A fact,
+    # not an instruction, so it belongs here rather than in the phase prompt.
+    parts = [f"Phase: {session.get('phase')}", f"Today: {date.today().isoformat()}"]
 
     selected = session.get("selected_listing_id")
     if selected:

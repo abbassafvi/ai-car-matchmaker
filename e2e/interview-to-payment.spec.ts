@@ -48,7 +48,11 @@ test.describe('Full interview→payment path', () => {
     const chatInput = page.locator('[data-testid="chat-input"]');
     const sendButton = page.locator('[data-testid="chat-send"]');
 
-    await chatInput.fill('I want an SUV to buy, budget up to $25000, for daily commute.');
+    // All five interview slots in one message (use case, category, budget,
+    // transaction type, target date). Miss any one and the interview
+    // continues, research never runs, and every assertion below this
+    // point waits 60s for a catalogue that cannot arrive.
+    await chatInput.fill('I want an SUV to buy, budget up to $25000, for daily commute, needed by 2026-12-01.');
     await sendButton.click();
 
     // Wait for assistant response (interview or research)
@@ -59,18 +63,30 @@ test.describe('Full interview→payment path', () => {
     const a2uiPanel = page.locator('[data-testid="a2ui-panel"]');
     await expect(a2uiPanel).toBeVisible();
 
-    // Wait for catalogue cards to appear (may take time for research)
-    await expect(page.locator('[data-surface-id]').first()).toBeVisible({ timeout: 60_000 });
-
-    // 4. Select a listing (click a catalogue card button)
-    // The catalogue cards have "Choose this one" buttons
+    // 4. Wait for the CATALOGUE, not merely for "a surface".
+    //
+    // This used to wait on `[data-surface-id]` and then guard everything
+    // below on `if (await chooseButton.isVisible().catch(() => false))`.
+    // Both halves were wrong together: the reasoning panel is a
+    // `[data-surface-id]` and lands ~2s in, long before the catalogue, so
+    // the wait was satisfied early, `chooseButton` was not yet rendered,
+    // the `if` was false, and the entire booking + checkout + confirmation
+    // section was skipped -- while the test reported a pass in under five
+    // seconds. A conditional around the part of a test that does the work
+    // is a test that cannot fail.
+    //
+    // Waiting on the card button itself is both the real precondition and
+    // the thing the next line clicks. The timeout covers the narration LLM
+    // call, after which the catalogue is sent.
     const chooseButton = page.locator('button:has-text("Choose this one")').first();
-    if (await chooseButton.isVisible({ timeout: 10_000 }).catch(() => false)) {
+    await expect(chooseButton).toBeVisible({ timeout: 120_000 });
+    await expect(page.locator('[data-surface-id]').first()).toBeVisible();
+    {
       await chooseButton.click();
 
       // 5. Wait for booking form MCP App to appear
       const mcpAppFrame = page.locator('iframe').first();
-      await expect(mcpAppFrame).toBeVisible({ timeout: 15_000 });
+      await expect(mcpAppFrame).toBeVisible({ timeout: 30_000 });
 
       // The booking form should be visible in the iframe
       const frame = mcpAppFrame.contentFrame();
@@ -157,7 +173,11 @@ test.describe('Full interview→payment path', () => {
 
     // Send an interview message to trigger research
     const chatInput = page.locator('[data-testid="chat-input"]');
-    await chatInput.fill('I need a sedan to rent for $100/day.');
+    // Must fill all five interview slots (use case, category, budget,
+    // transaction type, date) or research never runs and no surface is
+    // ever created -- this used to send a one-slot message and then wait
+    // 60s for a catalogue that could not arrive.
+    await chatInput.fill('I need a sedan to rent for commuting, up to $100 a day, from 2026-10-01.');
     await page.locator('[data-testid="chat-send"]').click();
 
     // Wait for A2UI surfaces to appear

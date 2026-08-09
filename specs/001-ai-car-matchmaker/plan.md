@@ -123,9 +123,9 @@ mock listings
 
 | Principle | Gate | Status |
 |---|---|---|
-| I. Grounded Recommendations | UI values sourced only from tool-call records, never LLM-retyped | **PASS at the A2UI surfaces (since M3 Phase D)**, with one residual noted below. The catalogue renders from `SessionState.candidate_listings` + `.recommendations` only; `test_catalogue_grounding.py` compares every rendered value back to its source record and asserts its own non-vacuity, and a live run confirmed all 16 catalogue values byte-identical to `listings.json`. **Residual**: the chat narration is still model-authored prose, and while `narration_brief` forbids any number not printed in the brief, that constraint is prompt-enforced rather than structural — the *grounded* channel is the catalogue. T029/T046 measure the prose. Previously recorded as: PARTIAL (materially advanced in M3 Phase C) — listing data now reaches the user, and it is grounded end to end: the search query is built from persisted interview state rather than from the model (`agent/research.py`), ranking is deterministic Python over the tool artifact (`agent/ranking.py`), and the verbatim records are persisted in `SessionState.candidate_listings`. Verified live: four recommended listings byte-identical to `listings.json` on price/year/mileage/category, and all 11 numbers in the model's narration traceable to the slate. Still PARTIAL because the **A2UI surface** is the part the principle names and that is T026/T022 (Phase D) — today the values reach the user as chat prose |
+| I. Grounded Recommendations | UI values sourced only from tool-call records, never LLM-retyped | **PASS at the A2UI surfaces (M3 Phase D) and at the booking MCP App (M4a).** The App is the stronger case: `open_booking_form` is bound to the model with **no arguments at all**, so the listing reaches the form from `SessionState.selected_listing()` and there is no channel through which a retyped price could enter — grounding made structural rather than prompt-enforced. Verified live end to end: the price, year and mileage the form renders are byte-identical to the persisted search record. One residual remains, noted below. The catalogue renders from `SessionState.candidate_listings` + `.recommendations` only; `test_catalogue_grounding.py` compares every rendered value back to its source record and asserts its own non-vacuity, and a live run confirmed all 16 catalogue values byte-identical to `listings.json`. **Residual**: the chat narration is still model-authored prose, and while `narration_brief` forbids any number not printed in the brief, that constraint is prompt-enforced rather than structural — the *grounded* channel is the catalogue. T029/T046 measure the prose. Previously recorded as: PARTIAL (materially advanced in M3 Phase C) — listing data now reaches the user, and it is grounded end to end: the search query is built from persisted interview state rather than from the model (`agent/research.py`), ranking is deterministic Python over the tool artifact (`agent/ranking.py`), and the verbatim records are persisted in `SessionState.candidate_listings`. Verified live: four recommended listings byte-identical to `listings.json` on price/year/mileage/category, and all 11 numbers in the model's narration traceable to the slate. Still PARTIAL because the **A2UI surface** is the part the principle names and that is T026/T022 (Phase D) — today the values reach the user as chat prose |
 | II. Explicit Phase Gating | Transactional tools unavailable outside their phase | PASS (since M2.5, completed M3 Phase E) — `TOOLS_BY_PHASE` in `agent/state.py` is the single gate definition and `agent/graph.py` builds one agent per phase from it. **All three phase transitions are now code paths in `SessionState`** (`save_interview_slots`, `record_research`, `select_listing`), none of them a model decision. Phase E closed the last hole: `select_listing` had been *named* by the gate since M2.5 with nothing implementing it, so Principle II's own worked example — `open_booking_form` gated on a listing being selected — had no precondition anything could satisfy. Covered by `test_phase_gate.py`, `test_mcp_wiring.py`, `test_select_listing.py`. **Caveat**: `FORM_FILLING` is now reachable but its tools land in M4a |
-| III. Mock-Only Transactions | No real payment path exists | PENDING, but **now partly enforced ahead of time** (M4a Phase A). The booking form has no payment field at all, and `booking/store.py`'s `FIELDS` is an allowlist that `normalise()` applies *before* validation and persistence, so a card number submitted into a tampered form is discarded at the boundary rather than filtered later. Tests assert both the schema property and the runtime drop. `confirm_mock_payment` and the real enforcement point still land in M4b |
+| III. Mock-Only Transactions | No real payment path exists | **PENDING — and M4b is where it stops being free.** M4a satisfies it by construction (the booking form has no payment field), so nothing has yet been *tested against an actual card-like input arriving*. `confirm_mock_payment` will receive one. Enforced ahead of time so far (M4a Phase A): The booking form has no payment field at all, and `booking/store.py`'s `FIELDS` is an allowlist that `normalise()` applies *before* validation and persistence, so a card number submitted into a tampered form is discarded at the boundary rather than filtered later. Tests assert both the schema property and the runtime drop. `confirm_mock_payment` and the real enforcement point still land in M4b |
 | IV. Untrusted Data Boundary | Listing/user text never treated as instructions | **PASS on `openai/gpt-oss-120b` (since M3 Phase F)**, with one caveat below. The rule is in every listing-facing prompt, `store.wrap_untrusted()` genuinely emits the delimiters server-side, and **T029 now supplies the behavioural proof**: all three `ADV-*` probes reach the model inside the delimiters and cause zero deviation — no fabricated `$1` price, no unrequested `select_listing` call, no phase advance, no system-prompt or credential disclosure, and the deterministic ranking byte-identical across the model turn. A fourth test asserts the probes do not derail the turn either, since a boundary enforced by refusing to answer is not a win. Run against **both** shipped models: Groq `openai/gpt-oss-120b` and Gemini `gemini-3.6-flash`, clean on each. An injection result is only evidence for the model it ran on, so re-run T029 whenever the model changes. Previously recorded as: PARTIAL (improved in M3 Phase B) — the *rule* is in every listing-facing prompt (`agent/prompts.py`), and the delimiters it refers to are now genuinely emitted: `store.wrap_untrusted()` wraps each `description` server-side, at the tool-output boundary, before it can reach the model. Confirmed live that the `ADV-0001` payload arrives inside the delimiters via `langchain-mcp-adapters`. Still PARTIAL because what remains is the **behavioural** proof — T029 must show the three `ADV-*` probes cause zero deviation. A wrapper the model ignores is not a boundary |
 | V. Full Observability | Every call/transition traced | **PASS since M4a Phase C1 — previously overstated.** LLM calls and tool calls have been traced since M2.5 via `setup_observability(auto_instrument=True)`, which patches LangChain. **Phase transitions were not**, and the row said they were: a grep for `get_tracer`/`start_as_current_span` across production code returned nothing, so every span was a by-product of a graph *run* — while `_handle_action` advances RESULTS_READY → FORM_FILLING through `aupdate_state`, outside any run, and the MCP App bridge will do the same on submit. `SessionState` now emits a `phase.transition` span itself, from beside the mutation rather than from each caller, carrying `phase.from`/`phase.to`/`phase.trigger`. Fail-soft (§8.28). **Verified against a running Phoenix**, not only at the SDK: a four-transition session produced four `phase.transition` spans, each carrying the right `phase.from`/`phase.to`/`phase.trigger`/`session.id` (§3 lesson 4). Covered by `test_phase_spans.py` (the span is real) and `test_booking_state.py` (every transition emits one) — split deliberately, since "the mechanism exists" and "the mechanism is called" are exactly the two things M2.5 found failing independently |
 
@@ -387,6 +387,44 @@ the false claim fell out immediately. When a change forces a sweep across
 every instance of some pattern, read what is already there — that sweep is
 the audit you are not otherwise going to run.
 
+### Correction (M4a Phase E) — found by talking to it, not by auditing it
+
+The ninth round, and the second that came from no audit at all. M4a's five
+phases were complete and every suite was green; the defects turned up in the
+first real conversation through the finished stack. Three were visible only
+on a screen, and none was reachable from any test.
+
+- **The model cannot see the screen, and a resumed session exposes it.**
+  Every surface in this project renders from persisted state *straight to
+  the browser* — which is exactly what Principle I asks for, and it means
+  the UI and the model hold different views of the session. Asked for "the
+  Lexus", the agent replied asking for a listing id: it only ever learns the
+  slate through its own message history, and a resumed session has none. A
+  *fresh* session hides this completely, because the research turn happens
+  to narrate the cars into context. spec.md US5 says a resumed session
+  continues where it left off; being asked to quote an id is not that.
+- **Row II's convergence held on state and broke on screen.** A spoken
+  selection recorded the choice and opened the booking form while every
+  catalogue card still read "Choose this one" — `_handle_action` re-renders
+  after a click and nothing re-rendered after the tool. Invisible to every
+  test, all of which assert on `SessionState`, and the state was correct.
+- **A fix written as a rule was applied to one instance.** Phase F put the
+  no-markdown rule in `research.py`'s narration brief; the *results* prompt
+  had never carried it and emitted `**LST-0039 ...**` literally two
+  milestones later.
+- **A perfectly grounded reply promised things that do not exist** — a test
+  drive, financing, a trade-in, delivery. Principle I held perfectly: not one
+  value was invented. Lesson 13 again, in a new currency.
+
+Ninth lesson: **test conversational behaviour on a resumed session.** A
+fresh session is the easy case and it conceals an entire class of bug — one
+that Principle I's own architecture creates, by design, every time a surface
+renders from state rather than through the model.
+
+Tenth lesson: **when a fix is a rule, fix the class.** Ask which other
+places the rule applies to and assert it across all of them, or the next
+surface to grow the same shape will reproduce the defect.
+
 ## Project Structure
 
 ### Documentation (this feature)
@@ -439,7 +477,7 @@ frontend/                           # React + Vite
 │   │                               #   not split into chat/a2ui/ subfolders
 │   │                               #   until mcp-app-host/ in M4 adds real
 │   │                               #   complexity worth separating)
-│   └── mcp-app-host/               # M4: our Host impl: iframe sandbox, CSP,
+│   └── mcp-app-host/               # ✅ M4a Phase D: AppBridge host —
 │                                   #   postMessage bridge (adapted from
 │                                   #   ext-apps/examples/basic-host)
 └── tests/
@@ -472,6 +510,15 @@ process". Until M4a that was aspirational — the container ran a single app
 (`marketplace.server:app`). As of M4a Phase A it is real: `mcp-services/app.py`
 mounts marketplace at `/mcp` (unchanged) and booking at `/booking/mcp`, and
 the Dockerfile runs `app:app`. Payment joins at `/payment/mcp` in M4b.
+
+**And a third correction (M4a Phase C1)**: each mounted FastMCP server must
+declare `transport_security` explicitly. The default enables DNS-rebinding
+protection with a localhost-only allowlist, so booking answered `421` to
+every request from another container while `GET /booking/health` — a
+`custom_route`, which bypasses that middleware — kept reporting `ok`.
+Marketplace was unaffected only because passing `host="0.0.0.0"` makes
+FastMCP drop the setting entirely, i.e. a binding argument was silently
+deciding a security policy. Payment must state it too.
 
 ## Complexity Tracking
 

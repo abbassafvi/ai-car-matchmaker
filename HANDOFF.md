@@ -5,19 +5,20 @@ continue this project with zero re-discovery and without repeating mistakes
 already made and fixed. Read this file first, then the files listed in
 [§13 Required reading](#13-required-reading).
 
-**Last updated**: 2026-08-09, after **M4a Phase C1** shipped.
-**M3 is complete.** **M4a is in progress**: Phases A (booking MCP server),
-B (the booking-form MCP App bundle) and **C1 — the whole §14 audit worklist
-plus the backend tools and transitions** — are done. **C2 is next**: the
-`mcp_app` WebSocket envelope, its reverse channel, and the code-driven
-kickoff. See §10.
+**Last updated**: 2026-08-09, after **M4a shipped complete** (Phases A–E).
+**M0–M4a are done.** Interview → automatic research → deterministically
+ranked A2UI catalogue → selection (by click *or* by speaking) → the booking
+form as a real MCP App in the chat → server-validated submission →
+AWAITING_PAYMENT. Verified against a full `docker compose up --build`, in a
+real browser, with a real conversation. **M4b (mock checkout) is next — see
+§10.**
 
-> **Treat every claim in this file as a claim, not as truth.** Seven separate
-> audits have now found docs asserting behaviour the code did not have — and
-> one found the inverse. An eighth correction came not from an audit but
-> from *fixing* the seventh one — see §3's last block, which is the cheapest
-> way any of these has been found. The numbers below were measured on
-> 2026-08-09, not copied forward.
+> **Treat every claim in this file as a claim, not as truth.** Nine rounds
+> of correction now, each a *different* shape of failure (§3). Two did not
+> come from an audit at all: one from *fixing* the previous audit, and one
+> from simply **talking to the finished product**, which found four defects
+> no test could reach. Every number below was measured on 2026-08-09 with
+> nothing else running, not copied forward.
 
 ---
 
@@ -50,7 +51,7 @@ and a *mocked* checkout **without leaving the chat**.
 | 11 | Ship as Docker container **or** deployed public app | ✅ `docker compose up` verified |
 | 12 | Public GitHub repo, documented, README with run instructions | ✅ |
 | 13 | Short slide deck (template from organizers — **not yet received**) | 🟡 **deferred to last, user-owned.** Content already drafted in `specs/001-ai-car-matchmaker/deck-outline.md`; only styling awaits the template. Do not work on it unless asked |
-| 14 | Short video demo of the working app | ⬜ **deferred to last, user-owned** — recording is the user's to do, and there is nothing to record until M4a/M4b land |
+| 14 | Short video demo of the working app | ⬜ **deferred to last, user-owned.** Now genuinely *recordable*: the interview → research → catalogue → booking path is complete and demoable as of M4a. Checkout (M4b) is the only part still missing from a full run-through |
 | 15 | **Bonus**: AI observability + evals via Langfuse or Arize Phoenix over OTel | 🟡 observability ✅ (real spans verified); **evals still owed** (T046) |
 
 ### Locked-in decisions (made by the user, do not re-litigate)
@@ -177,32 +178,27 @@ a trailing `docs:` commit that stamps this section cannot list its own sha,
 so this block may lag HEAD by one or two docs-only commits — check
 `git log --oneline -5` rather than trusting it:
 ```
+(this docs: commit)  docs: hand off the M4a-complete state, re-tier for M4b
+bbeae52  M4a Phase E: full-stack verify, and the four defects a conversation found
+070dfd6  M4a Phase D (T034): the booking form renders in the chat, for real
+2d87a0c  M4a Phase C2: the MCP App wire, both directions
+a369d97  docs: update test counts for the click-path fixes
+440d582  Fix two bugs that only a browser could show, both in the click path
+6dc4af8  docs: correct a test count I measured with Phoenix still running
+81b0f82  docs: stamp the Phase C1 commit sha into HANDOFF's git log
 9b8f670  M4a Phase C1: the audit worklist, plus a 421 nobody could see
 7bca1df  docs: record the M4a A/B audit, and correct four stale doc claims
 69f9ac5  M4a Phase B (T032): the booking form, built as a real MCP App
 1189f91  M4a Phase A (T033 server half): booking MCP App server
-6821aaa  docs: re-tier the handoff for M4a and record the build-first priority
 47ec1d1  T049: draft the deck — the template blocker was mis-scoped
-7f43990  T029: verify the untrusted-data boundary on Gemini too — M3 fully closed
-7ca39a9  docs: record the full live sweep, now green, and a fourth key to rotate
-56cb6c6  docs: correct two test counts I wrote without measuring
+7f43990  T029: verify the untrusted-data boundary on Gemini too — M3 closed
 5a6bd25  M3 Phase F (T029, T021): behavioural tests, and the defects they found
-63ea11c  audit: correct the T029 probe-routing recipe, which never worked
-d78890e  docs: bring HANDOFF and plan.md up to the Phase E handoff state
 b2d35f3  M3 Phase E (T028): listing selection end to end
-a9b0e59  audit: take tracing off the request critical path; fix a stale docstring
-868f8de  M3 Phase D (T026, T022): A2UI reasoning + catalogue surfaces, themed frontend
-7acc4a2  docs: note that HANDOFF's git-log block lags by its own stamp commit
-cf90320  docs: rewrite HANDOFF sections 8/10/13 for a Phase D handoff
-82d4b6b  docs: point HANDOFF at Phase D and correct the Phase C references
-701acda  docs: stamp the Phase C commit sha into HANDOFF's git log
+868f8de  M3 Phase D (T026, T022): A2UI reasoning + catalogue surfaces
 dd7ab4a  M3 Phase C (T024, T025): MCP wiring, code-driven search, ranking
-8e44793  M3 Phase C pre-flight audit: fix test collection, correct stale docs
-2fa9fcf  docs: bring HANDOFF/README/plan/tasks up to M3 Phase B state
 c6915fd  M3 Phase B (T020, T023): marketplace MCP server over Streamable HTTP
-dea1576  M3 Phase A: async agent path, provider-aware token caps, doc corrections
-c208807  docs: rewrite HANDOFF for M2.5 state and flag M3's open quota decision
-b5a0bcb  M2.5: audit remediation — wire observability and the phase gate, swap LLM provider
+dea1576  M3 Phase A: async agent path, provider-aware token caps
+b5a0bcb  M2.5: audit remediation — wire observability and the phase gate
 6cef214  M2: Conversational Interview (User Story 1) end to end
 ```
 
@@ -517,7 +513,8 @@ AS1 now matches 4 listings. Reversible: one constant table + regenerate.
 │  chat shell (src/App.tsx)                                          │
 │   ├─ @a2ui/react renderer  → interview progress ✅, reasoning ✅,   │
 │   │                          catalogue ✅ (+ select Button)         │
-│   └─ MCP Apps host (M4)    → sandboxed iframes: booking, checkout  │
+│   └─ mcp-app-host/ ✅       → AppBridge + srcdoc iframe (booking);   │
+│                              checkout joins in M4b                  │
 └───────────────────────────────┬────────────────────────────────────┘
                     WebSocket /ws/{session_id}
 ┌───────────────────────────────▼────────────────────────────────────┐
@@ -537,7 +534,7 @@ AS1 now matches 4 listings. Reversible: one constant table + regenerate.
 │  marketplace/ ✅ FastMCP     │        │ UI    :16006       │
 │    store.py  query logic    │        │ OTLP  :14317       │
 │    server.py MCP tools      │        └────────────────────┘
-│  booking/ ⬜  payment/ ⬜     │
+│  booking/ ✅  payment/ ⬜     │
 │  + data/listings.json (203) │
 └─────────────────────────────┘
 ```
@@ -778,7 +775,11 @@ python mcp-services/data/generate_listings.py
 §8.21e/§8.21f before editing selectors), `src/main.tsx`, `index.html`,
 `package.json` (**`@a2ui/react` + `@a2ui/web_core` v0.10.2**, React 19,
 Vite 8), multi-stage `Dockerfile` (**`npm ci` with the lockfile** → nginx).
-`src/{chat,a2ui,mcp-app-host}/` exist but are **empty**.
+**`src/mcp-app-host/`** holds the MCP Apps host (Phase D): `McpAppFrame.tsx`
+(AppBridge over a `srcdoc` iframe), `csp.ts` (the server's declared CSP
+turned into one the browser enforces), `csp.test.ts` (**vitest** — the
+repo's only frontend tests, `npm test`) and `types.ts` (the `mcp_app`
+envelope). `src/{chat,a2ui}/` are still empty.
 App.tsx renders **every** surface in `processor.model.surfacesMap`, so the
 backend can add surfaces without a frontend change (proven by Phase D: the
 two new surfaces appeared with no App.tsx change beyond styling).
@@ -1272,11 +1273,16 @@ see §5. Consequences for M4a onward:
   slate short; consider `llama-3.3-70b-versatile` (12k TPM) if throttling bites,
   accepting weaker prompt adherence.
 - **DeepAgents' ~2.7k token/request tax** (§8.12) — unavoidable given req #9.
-- **`frontend/src/{chat,a2ui,mcp-app-host}/` are still empty** — M2 put
-  everything in `App.tsx`. `mcp-app-host/` is where M4a **Phase D** goes.
-  (`mcp-apps-ui/booking-form/` is **no longer** empty as of Phase B;
-  `mcp-apps-ui/{checkout,listing-detail}/` and `mcp-services/payment/`
-  still are.)
+- **`frontend/src/{chat,a2ui}/` are still empty** — M2 put everything in
+  `App.tsx` and it has not needed splitting. `mcp-app-host/` is **no longer**
+  empty (Phase D). `mcp-apps-ui/{checkout,listing-detail}/` and
+  `mcp-services/payment/` still are.
+- 🟡 **The booking iframe does not auto-size.** The App is built with
+  ext-apps' `autoResize` and the host handles `onsizechange`, but the
+  notification never arrives, so the iframe keeps its CSS height and a long
+  form scrolls inside its panel. The handshake demonstrably completes
+  (`oninitialized` fires, both tool notifications are delivered), so this is
+  isolated to that one notification. Cosmetic; not chased.
 - ✅ *(resolved in Phase C1)* **A stale `form.html` shipping silently**
   (§14 finding 7). `install-bundle.mjs` now writes `form.build.json`, a
   SHA-256 manifest of every source that feeds the bundle, and
@@ -1303,8 +1309,9 @@ see §5. Consequences for M4a onward:
   `refine_search`, and carries `FORM_FILLING_SYSTEM_PROMPT` rather than
   sharing AWAITING_PAYMENT's. `submit_booking` is deliberately absent — App
   bridge only.
-  ⚠️ **Still do not demo past the selection.** The agent can now open the
-  form; nothing puts it on screen until C2 + D.
+  ✅ *(completed in Phases C2 + D)* The form now opens on screen by itself
+  and can be submitted. **The demo runs cleanly through booking**; the only
+  step still missing from a full run-through is checkout (M4b).
 - 🟡 **The demo's headline path opens on a constraint relaxation unless you pick a late target date** (decision taken in Phase D — see below).
   §3b fixed the *price* floor so US2 AS1 matches 4 SUVs, but every real
   session also applies `target_date`, and **0** of those 4 are available
@@ -1455,82 +1462,87 @@ form in the chat. That is Phases C and D.
 
 ## 13. Required reading
 
-For a new session, read in this order. **Re-tiered for M4a Phase C2**
-(2026-08-09). Earlier tierings are in git history.
+For a new session, read in this order. **Re-tiered for M4b** (2026-08-09).
+Earlier tierings are in git history.
 
-**Read §10 (what C1 shipped + C2's scope) before writing any code.** §14 is
-now history rather than a worklist — all twelve findings are fixed — but
-read it anyway for the *shapes* of defect this codebase produces. §12b
-still describes the server and bundle C2 has to carry to the browser.
+**Read §10 before writing any code** — it records what M4a's five phases
+shipped and scopes M4b. §14 is history rather than a worklist now (all
+fifteen findings fixed), but read it for the *shapes* of defect this
+codebase produces; §3 is the same lesson generalised and is the single most
+valuable section here.
 
 **Tier 1 — orientation (always read, 6 files):**
 
 1. **`HANDOFF.md`** ← this file (full context + gotchas)
-2. **`.specify/memory/constitution.md`** — the 5 principles all code must honor
-3. **`specs/001-ai-car-matchmaker/spec.md`** — **US3 is M4a's spec**: read its
-   3 acceptance scenarios and FR-006/FR-010 closely
-4. **`specs/001-ai-car-matchmaker/tasks.md`** — task state + per-task findings.
-   **Phase 5 = M4a; T032 and T033 are done, T030/T031/T034/T035 are not**
-5. **`specs/001-ai-car-matchmaker/plan.md`** — architecture + the Constitution
-   Check table (**all six** correction blocks)
-6. **`README.md`** — run instructions
+2. **`.specify/memory/constitution.md`** — the 5 principles all code must
+   honour. **Principle III is M4b's whole point** and, unlike M4a, is not
+   satisfied by construction
+3. **`specs/001-ai-car-matchmaker/spec.md`** — **US4 is M4b's spec**: its 3
+   acceptance scenarios plus FR-007/FR-008. US3 is now implemented, so read
+   it as a worked example rather than a to-do
+4. **`specs/001-ai-car-matchmaker/tasks.md`** — task state + per-task
+   findings. **Phase 5 = M4a, all of T030–T035 now checked** with the
+   findings recorded under each; **Phase 6 = M4b, T036–T041**
+5. **`specs/001-ai-car-matchmaker/plan.md`** — architecture + the
+   Constitution Check table (**all eight** correction blocks)
+6. **`README.md`** — run instructions, including `npm test` for the
+   frontend units
 
-**Tier 2 — what Phase C actually touches (5 files).** Read closely:
+**Tier 2 — the M4a pattern M4b should copy (6 files).** Read closely; each
+already solves a problem checkout will hit:
 
-7. `agent-backend/agent/state.py` — all **five** transitions (C1 added
-   `refine_results` and `submit_booking`), the rewritten `TOOLS_BY_PHASE`
-   with its three load-bearing changes explained inline,
-   **`selected_listing()` — the verbatim record the form pre-fills from**
-   (Principle I: never model prose), and **`booking_form_requests`**, the
-   counter C2's kickoff reads
-8. `agent-backend/agent/tools.py` — **the file C2 leans on most.**
-   `build_booking_tools` is where `open_booking_form` becomes
-   argument-free, and its header comment is the one thing to read before
-   touching MCP tool wiring: injecting a raw MCP tool of the same name
-   silently beats a local one
-9. `agent-backend/api/main.py` — the WS contract (`chat`/`action` in,
-   `chat`/`a2ui`/`error` out; C2 adds `mcp_app` out and `app_tool_call` in),
-   `_SurfaceStream`, `_handle_action`, `_persist_session`,
-   `_run_research_turn`. **`_handle_action` is the precedent** for mutating
-   state outside a graph run (§8.20c) and **`_run_research_turn` is the
-   precedent** for the code-driven kickoff. Note `_handle_action` still
-   runs *before* the phase gate — that is now deliberate and matched by the
-   gate rather than a divergence
-10. `mcp-services/booking/server.py` + `store.py` — the resource, its
-    `_meta.ui.csp`, and `submit_booking(listing_id, fields, available_from)`.
-    **Read §10 item 1 before fetching the resource**: the adapter drops the
-    CSP
-11. `frontend/src/App.tsx` — the chat shell, the A2UI renderer and the
-    `ActionListener`. `src/mcp-app-host/` is an **empty dir**; Phase D's
-    iframe host goes there. The booking iframe renders **in the chat
-    column**, not the surfaces panel (decided 2026-08-08)
+7. `mcp-services/booking/store.py` — **the Principle III pattern.** `FIELDS`
+   is an allowlist and `normalise()` applies it *before* validation and
+   *before* persistence, so a card number in a tampered payload is dropped
+   at the boundary. Checkout needs exactly this, for real rather than
+   pre-emptively
+8. `mcp-services/booking/server.py` + `mcp-services/app.py` — what makes a
+   server an MCP App (`ui/resourceUri`, `text/html;profile=mcp-app`,
+   `_meta.ui.csp` on the **resource**), how a third server mounts, and
+   `transport_security` — **omit it and the server 421s every container
+   request while its health route says ok** (§14 finding 13)
+9. `agent-backend/agent/tools.py` — `build_booking_tools` is the template
+   for a model-facing tool that takes **no arguments** and reads state
+   instead. Its header comment is the one thing to read before wiring any
+   MCP tool: an injected raw tool silently beats a local one of the same
+   name
+10. `agent-backend/api/main.py` — the whole wire. `_BookingFormStream`
+    (when to push an App), `build_booking_app_envelope` (resource +
+    toolInput + toolResult, and why the input is *projected*),
+    `_handle_app_tool_call` (**the App-bridge gate — a second gate with a
+    different subject from `TOOLS_BY_PHASE`**), and the kickoff calls
+11. `agent-backend/agent/state.py` — all **five** transitions in one module
+    and their spans. Checkout adds the sixth, `AWAITING_PAYMENT → CONFIRMED`
+12. `frontend/src/mcp-app-host/` — `McpAppFrame.tsx` + `csp.ts`. **Already
+    generic**: it renders whatever `mcp_app` envelope arrives, so a second
+    App needs no new host code
 
 **Tier 3 — reference for anything you touch:**
 
-12. `agent-backend/agent/graph.py` — `resolve_registry()` /
-    `PhaseAgentRegistry`; how a new tool gets bound to exactly one phase
-13. `agent-backend/tests/test_phase_gate.py` + `tests/test_mcp_wiring.py` —
-    how the gate is proven; T030 extends this. Keep both passing
-14. `agent-backend/agent/prompts.py` — `TRANSACTION_SYSTEM_PROMPT` is the
-    FORM_FILLING prompt and already carries `UNTRUSTED_DATA_RULE`
-15. `agent-backend/agent/render_a2ui.py` — the three A2UI surfaces. Read
-    §8.19 and §8.21c–f before editing. **M4a is MCP Apps, not A2UI** — the
-    booking form is an iframe, deliberately a different surface (§1)
-16. `agent-backend/agent/mcp_client.py` — fail-soft discovery; a second MCP
-    server means this and `/health`'s `mcp_connected` need revisiting
-17. `agent-backend/tests/test_catalogue_grounding.py` — the model for a
-    **non-vacuous** assertion; T031 needs the same care
-18. `agent-backend/tests/support_live.py` + `test_prompt_injection.py` — how
-    a live-gated test is written here (gate, pacing, quota-skip)
-19. `agent-backend/agent/llm.py` — provider selection, token caps, retries
-20. `agent-backend/agent/research.py` + `ranking.py` — how the slate M4a
-    books against was produced
-21. `docker-compose.yml` — **no change needed for M4a**: the booking server
-    shares mcp-services' existing port 8100 under `/booking`
+13. `agent-backend/agent/graph.py` — `resolve_registry()` /
+    `PhaseAgentRegistry`; how a tool gets bound to exactly one phase
+14. `agent-backend/agent/prompts.py` — one prompt per phase,
+    `phase_context_line()` (facts, never instructions — §3 lesson 14), and
+    the markdown rule every prose phase now carries
+15. `agent-backend/tests/test_booking_gate.py` + `test_booking_app_wire.py`
+    — how M4a's contracts are pinned; T036/T037 are the same tests for
+    checkout
+16. `agent-backend/tests/test_phase_gate.py` + `test_mcp_wiring.py` — how
+    the gate is proven. Keep both passing
+17. `agent-backend/agent/render_a2ui.py` — the three A2UI surfaces. Read
+    §8.19 and §8.21c–f before editing. **MCP Apps are iframes, not A2UI** —
+    deliberately a different surface (§1)
+18. `agent-backend/agent/mcp_client.py` — fail-soft discovery per server,
+    `call_structured`, and `read_form_resource` (**why the adapter is
+    bypassed**: `get_resources()` drops `_meta`, i.e. the CSP)
+19. `agent-backend/tests/support_live.py` + `test_prompt_injection.py` —
+    how a live-gated test is written here (gate, pacing, quota-skip)
+20. `agent-backend/agent/llm.py` — provider selection, token caps, retries
+21. `docker-compose.yml` — `MCP_BOOKING_URL` is set explicitly because the
+    defaults are localhost and silently wrong in a container; payment will
+    need the same
 
----
-
-## 14. THE AUDIT (2026-08-09) — Phase C's actual worklist
+## 14. THE M4a AUDIT (2026-08-09) — history, all findings fixed
 
 A full audit was run after M4a Phases A+B, **before** Phase C wired anything
 up. Every finding below was **reproduced**, not inferred. Findings 1–4 are
@@ -1623,100 +1635,86 @@ unequal privileges, and only one updates state.**
 > needed. §13 was re-tiered on 2026-08-09 for this phase.
 >
 > This is the Amulate Summer Hackathon 2026 "AI Car Matchmaker".
-> **M0–M3 are complete, verified live and pushed.** Interview → automatic
-> research → deterministically ranked A2UI catalogue → listing selection →
-> FORM_FILLING works end to end.
+> **M0 through M4a are complete, verified live and pushed.** Interview →
+> automatic research → deterministically ranked A2UI catalogue → listing
+> selection by click *or* by speaking → the booking form as a real MCP App
+> inside the chat → server-side validation → booking recorded →
+> AWAITING_PAYMENT. Verified against a full `docker compose up --build`, in
+> a real browser, with a real conversation. **Hard requirement #3 is met.**
 >
-> **M4a (the in-chat booking form as an MCP App, hard requirement #3) is
-> three phases in.** A and B built the booking MCP App server and its
-> self-contained `ui://` form bundle. **C1 fixed all twelve findings of the
-> 2026-08-09 audit** and gave the agent a safe way to open the form: a
-> `open_booking_form` tool with **no model-facing arguments**, two new phase
-> transitions, `refine_search`, booking-server discovery, and
-> phase-transition spans. 22/22 live checks against the real two-server
-> process. **Nothing puts the form on a screen yet.**
+> **Start M4b: the mock checkout MCP App (hard requirement #4).** §10 scopes
+> it and §13 Tier 2 lists the six files that already solve the problems it
+> will hit. It should be markedly cheaper than M4a — the pattern exists now,
+> `app.py::compose` already mounts multiple servers, and the frontend host
+> is generic (it renders whatever `mcp_app` envelope arrives, so a second
+> App needs no new host code).
 >
-> **Start at M4a Phase C2 — §10 has its scope.** §14 is now history rather
-> than a worklist (every finding carries its fix), but read it for the
-> *shapes* of defect this repo produces. C2 needs **no LLM spend** except
-> the live prompt pass noted below.
+> **The one thing M4b must get right that M4a did not have to:**
+> Constitution **Principle III**. M4a satisfied it by construction — the
+> booking form has no payment field. Checkout does. `confirm_mock_payment`
+> will receive card-like input and must discard it at the boundary, before
+> validation and before persistence, so it never reaches a session record,
+> a log line or an OTel span. `mcp-services/booking/store.py::normalise` is
+> the pattern; prove it with a test that submits a card number.
 >
-> Measured 2026-08-09 with nothing else running, not copied forward:
-> **290 tests** — mcp-services **93**, agent-backend **188 passed + 9
-> skipped**. 281 need no external setup. ⚠️ The *live* sweep has not been re-run since 2026-08-08
-> (163/0 then); everything added since is ungated, so it should now be
-> 193/0 — an inference, not a measurement.
+> Measured 2026-08-09 with nothing else running: **328 tests** —
+> mcp-services **94**, agent-backend **214 passed + 9 skipped**, frontend
+> **11** (vitest). **319 need no external setup.** The live suite was run
+> against a real model the same day: **agent-backend 217 passed, 0
+> skipped**; six ungated tests have been added since, so expect 223/0.
 >
 > Do **not** write code immediately. Confirm you have full context, tell me
-> anything that looks wrong, stale or self-contradictory, then design Phase
-> C2 and check it with me before implementing.
+> anything that looks wrong, stale or self-contradictory, then design M4b
+> and check it with me before implementing.
 >
 > **Priority: build the product.** The slide deck (#13) and demo video (#14)
 > are deliberately last and are mine to own — don't spend session time on
 > them unless I ask.
 >
-> Read §3 carefully — it is the most valuable section in the repo. Eight
-> corrections now, each a *different* shape: docs overclaiming, docs
+> Read §3 carefully — it is the most valuable section in the repo. Nine
+> rounds of correction, each a *different* shape: docs overclaiming, docs
 > underclaiming, docs accurate but code defective, a doc wrong about a
-> *procedure* it recommended, tests finding four real defects on their first
-> live run, latent defects in committed green code nothing had wired up —
-> and most recently a false claim found not by an audit but by **fixing the
-> previous audit**, because the fix forced a sweep across code nobody had a
-> reason to reread. The constant is not that documentation drifts — it is
-> that **nobody ran it.** Check every direction.
+> *procedure* it recommended, tests finding four defects on their first live
+> run, latent defects in committed green code nothing had wired up, a false
+> claim found by *fixing the previous audit*, and — most recently — four
+> defects found by simply **talking to the finished product**, three of them
+> visible only on a screen. The constant is not that documentation drifts;
+> it is that **nobody ran it.** Check every direction.
 >
-> Three things C1 measured that C2 must act on:
-> - 🔴 **`MultiServerMCPClient.get_resources()` drops the resource `_meta`,
->   including the CSP.** The declaration *does* survive the wire on
->   `read_resource()`'s `contents[0].meta` — use a raw `ClientSession`.
->   Going through the adapter silently discards what US3 AS1 requires and
->   nothing fails.
-> - 🟠 **ext-apps 1.7.5 requires `sendToolInput` before `sendToolResult`**,
->   and the tool *input* for `open_booking_form` is the listing record.
->   `LISTING_DISPLAY_FIELDS` strips `description` from the **result**, not
->   the arguments — send the projected record or untrusted marketplace prose
->   lands inside the App document.
-> - 🟠 **The FORM_FILLING prompt is new and has never met a model.** Its
->   content is unit-tested; its effect is not. §3 lesson 14: prompt defects
->   are ordering defects, invisible until a real turn runs.
->
-> Decisions already taken, do not re-litigate:
-> - **`submit_booking` is NOT model-callable** — iframe only, through the App
->   bridge. Already removed from `TOOLS_BY_PHASE`; keep it out.
-> - The booking iframe renders **in the chat column**, not the surfaces panel.
-> - The booking server shares mcp-services' port under **`/booking/mcp`**;
->   marketplace stays at `/mcp`.
-> - Opening the form is **code-driven** when the phase becomes FORM_FILLING;
->   `open_booking_form` is also bound so "show me the form again" works, and
->   `SessionState.booking_form_requests` is the counter that carries it to
->   the connection.
-> - A refinement or a re-selection **falls back to RESULTS_READY** and
->   discards the in-progress booking (decided 2026-08-09).
->
-> Carried-forward gotchas that each cost a cycle:
-> - **The raw booking MCP tools must never enter `extra_tools`.**
->   `resolve_registry` resolves extras *over* the local registry, so they
->   would silently replace the argument-free wrapper — same name, same
->   phase, green suite. Measured. See §3's tenth lesson.
-> - **Pre-fill from `SessionState.selected_listing()`** — the verbatim tool
->   record — never model prose (Principle I).
-> - **MCP Apps are iframes, not A2UI.** Deliberate — see §1's resolved
->   architectural ambiguity before "fixing" it.
-> - **After ANY edit to `mcp-apps-ui/booking-form/src/`, rebuild the bundle**
->   (`npm run build` there) and commit `form.html` **and** `form.build.json`.
->   Staleness is now *detected* (a test fails), not fixed for you.
-> - **Principle III applies from M4b on**: no card-like data in any DB row,
->   log or OTel span. The booking form has no payment field by design.
-> - **Groq's binding limit is 200,000 tokens/day ≈ 66 agent turns**, and it is
->   *invisible* in the rate-limit headers.
+> Carried-forward gotchas, each of which cost a cycle:
+> - **The model cannot see the screen.** Every surface renders from
+>   persisted state straight to the browser, so the UI and the model hold
+>   different views. Anything the user can point at ("the Lexus", "that
+>   price") must be put in the model's context deliberately —
+>   `phase_context_line()` does this. **Test conversational behaviour on a
+>   resumed session**, never only a fresh one; a fresh session hides the
+>   whole class of bug because narration happens to fill the gap.
+> - **Raw MCP tools must never enter `extra_tools`.** `resolve_registry`
+>   resolves extras *over* local tools, so a raw tool silently replaces the
+>   safe wrapper of the same name — same name, same phase, green suite.
+> - **A FastMCP server needs explicit `transport_security`**, or it answers
+>   `421` to every request from another container while its `/health` route
+>   cheerfully says ok (health routes bypass that middleware).
+> - **`MultiServerMCPClient.get_resources()` drops `_meta`**, i.e. the CSP.
+>   Use a raw `ClientSession.read_resource()`.
+> - **ext-apps: the host API is on the `/app-bridge` subpath**, and
+>   `sendToolInput` is required *before* `sendToolResult`.
+> - **Never render a listing's `description`** — attacker-controlled, and it
+>   carries the `<untrusted_listing_data>` delimiters. Note it rides in the
+>   tool *arguments* even when stripped from the *result*.
+> - **After ANY edit to `mcp-apps-ui/*/src/`, rebuild the bundle** and commit
+>   both `form.html` and `form.build.json`. Staleness is detected now (a
+>   test fails), not fixed for you.
+> - **Measure test counts with nothing else running.** A count taken with
+>   Docker up reads one test higher, and I published that mistake once.
+> - **Groq's binding limit is 200,000 tokens/day ≈ 66 agent turns**, invisible
+>   in the rate-limit headers. A 20–70s "hang" is retry backoff, not a
+>   failure. ~20–25% of 2026-08-09's budget was spent on Phase E.
 > - Live-gated tests read `LLM_CREDENTIALS_PRESENT` from
->   `agent-backend/conftest.py`. Don't recompute it in a test module and don't
->   import `api.main` at module scope — it calls `load_dotenv()` and silently
->   breaks the gate.
+>   `agent-backend/conftest.py`. Don't recompute it in a test module and
+>   don't import `api.main` at module scope.
 > - A2UI is **v0.9**; only the 18 components in §8.19 exist. Read §8.21c–f
 >   before touching a surface.
 > - Outbound POSTs to LLM providers fail inside the default tool sandbox;
 >   live-LLM commands need `dangerouslyDisableSandbox: true`.
-> - **Never render a listing's `description`** — attacker-controlled, and it
->   carries the `<untrusted_listing_data>` delimiters.
 > - **Rotate the four API keys after the demo** (§5). Still outstanding.

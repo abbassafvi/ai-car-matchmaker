@@ -895,18 +895,23 @@ MCP App WebSocket envelope) and D (the browser host) remain.**
         would replace the wrapper with the very thing it prevents, while
         the name stays bound and the phase stays gated. Pinned by asserting
         the resolved tool is *not* the raw one.
-- [ ] T031 [P] [US3] Integration test: incomplete submission rejected
-      server-side without data loss in the iframe. **Server half done in
-      Phase C1; the iframe half is Phase D.**
+- [x] T031 [P] [US3] Integration test: incomplete submission rejected
+      server-side without data loss in the iframe. **DONE — server half in
+      Phase C1, iframe half watched in Phase D.**
 
-      Verified live against the running booking server: an incomplete
-      submission returns `{"ok": false}` naming **all three** missing
-      fields at once, and a valid one is accepted with a card-like field
-      dropped by the allowlist. Still owed is the *iframe* clause — that
-      already-entered values survive the rejection round trip — which
-      cannot be asserted until Phase D renders the form. The mechanism
-      exists (`entered` lives outside the DOM, T032); per §3 lesson 9 that
-      is not the same as having watched it.
+      Server half, verified live against the running booking server: an
+      incomplete submission returns `{"ok": false}` naming **all three**
+      missing fields at once, and a valid one is accepted with a card-like
+      field dropped by the allowlist.
+
+      Iframe half, verified by driving the real form in a real browser
+      (§3 lesson 9 — the mechanism existing is not the same as having
+      watched it): submitting `email: "BAD"` came back rejected with the
+      message attached to the **email** field, and reading the inputs
+      afterwards showed `full_name`, `phone`, `pickup_date` **and `notes`**
+      all still populated. Non-vacuous in the direction that matters — the
+      values were read back out of the DOM after the round trip, not
+      assumed from the fact that `entered` lives outside it.
 
 ### Implementation for User Story 3
 

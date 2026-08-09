@@ -429,7 +429,7 @@ async def test_a_rejected_click_emits_no_span(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_two_clicks_in_a_row_survive_a_real_checkpointer():
+async def test_two_clicks_in_a_row_survive_a_real_checkpointer(monkeypatch):
     """The bug every other test in this file was structurally unable to see.
 
     They all persist through a `FakeAgent` whose `aupdate_state` is three
@@ -448,7 +448,22 @@ async def test_two_clicks_in_a_row_survive_a_real_checkpointer():
     So this test uses the **real** compiled agent and a real checkpointer,
     and clicks twice. `model=None` is fine because `aupdate_state` never
     runs the model -- the graph only has to be real enough to have nodes.
+
+    ⚠️ The dummy key is required, and its absence was a real defect found
+    in M4b by running the suite from a **fresh clone**. `model=None` falls
+    through to `build_model()`, which raises `LLMNotConfiguredError` when
+    no key is *present* (it never calls a provider here). On this machine
+    the test passed anyway, because `agent-backend/.env` exists and
+    `api.main`'s import-time `load_dotenv()` writes it into `os.environ`
+    -- §3's documented pollution, still able to make a test's result
+    depend on a file that is gitignored. A stranger cloning the repo got
+    213 passed / 1 failed where the docs promised 214 / 0.
+
+    Set here rather than gated: the test wants no live model, so skipping
+    it without a key would lose the coverage §14 finding 14 exists for.
     """
+    monkeypatch.setenv("LLM_API_KEY", "test-dummy-not-a-real-key")
+
     from langgraph.checkpoint.memory import InMemorySaver
 
     from agent.graph import build_agent_for_phase

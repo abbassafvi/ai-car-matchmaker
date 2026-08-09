@@ -83,6 +83,19 @@ class FallbackModel(BaseChatModel):
             "fallback": self.fallback._identifying_params,
         }
 
+    def bind_tools(self, tools, **kwargs):
+        """Bind tools on both primary and fallback, return a FallbackBinding.
+
+        LangGraph calls bind_tools BEFORE any LLM invocation.  Without
+        this override, BaseChatModel.bind_tools raises NotImplementedError
+        and the fallback never gets a chance to run.
+        """
+        return FallbackBinding(
+            fallback_model=self,
+            primary_bound=self.primary.bind_tools(tools, **kwargs),
+            fallback_bound=self.fallback.bind_tools(tools, **kwargs),
+        )
+
     def _generate(
         self,
         messages: list[BaseMessage],
@@ -149,6 +162,52 @@ class FallbackModel(BaseChatModel):
             return True
 
         return False
+
+
+class FallbackBinding:
+    """Returned by FallbackModel.bind_tools().
+
+    LangGraph calls model.bind_tools(tools) and then invokes the result.
+    BaseChatModel.bind_tools returns a _ChatModelBinding which is NOT a
+    BaseChatModel, so we cannot wrap it in another FallbackModel.
+
+    Instead, this class stores both bound models and delegates ainvoke
+    with fallback logic.  It quacks enough like a model for LangGraph
+    (has ainvoke, bound_tools attribute) without inheriting from
+    BaseChatModel, dodging the pydantic validation that rejects
+    _ChatModelBinding.
+    """
+
+    def __init__(self, fallback_model: FallbackModel, primary_bound, fallback_bound):
+        self._fallback_model = fallback_model
+        self._primary_bound = primary_bound
+        self._fallback_bound = fallback_bound
+        # LangGraph checks for bound_tools attribute
+        self.bound_tools = True
+
+    async def ainvoke(self, input, config=None, **kwargs):
+        try:
+            return await self._primary_bound.ainvoke(input, config, **kwargs)
+        except Exception as e:
+            if self._fallback_model._is_rate_limit_error(e):
+                log.warning(
+                    "Primary rate-limited in bind_tools path (%s), falling back",
+                    type(e).__name__,
+                )
+                return await self._fallback_bound.ainvoke(input, config, **kwargs)
+            raise
+
+    def invoke(self, input, config=None, **kwargs):
+        try:
+            return self._primary_bound.invoke(input, config, **kwargs)
+        except Exception as e:
+            if self._fallback_model._is_rate_limit_error(e):
+                log.warning(
+                    "Primary rate-limited in bind_tools path (%s), falling back",
+                    type(e).__name__,
+                )
+                return self._fallback_bound.invoke(input, config, **kwargs)
+            raise
 
 DEFAULT_PROVIDER = "google"
 DEFAULT_MODEL = "gemini-3.6-flash"

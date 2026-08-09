@@ -31,6 +31,7 @@ export default function App() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
   const [connected, setConnected] = useState(false);
+  const [typing, setTyping] = useState(false);
   // The booking MCP App, when the backend has one open for us. One at a
   // time by design: an App is bound to a phase, and the phase is singular.
   const [mcpApp, setMcpApp] = useState<McpAppEnvelope | null>(null);
@@ -79,6 +80,7 @@ export default function App() {
     Array.from(processor.model.surfacesMap.values()),
   );
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const [drawerBadge, setDrawerBadge] = useState(0);
 
   useEffect(() => {
     const sync = () => setSurfaces(Array.from(processor.model.surfacesMap.values()));
@@ -131,7 +133,10 @@ export default function App() {
       ws.onmessage = (event) => {
         const data = JSON.parse(event.data);
         if (data.type === "chat") {
+          setTyping(false);
           setMessages((prev) => [...prev, { role: data.role, content: data.content }]);
+        } else if (data.type === "typing") {
+          setTyping(!!data.typing);
         } else if (data.type === "a2ui") {
           processor.processMessages(data.messages);
         } else if (data.type === "error") {
@@ -158,7 +163,7 @@ export default function App() {
 
   // Keep the newest message in view; a research turn appends several.
   useEffect(() => {
-    if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight;
+    if (logRef.current) logRef.current.scrollTo({ top: logRef.current.scrollHeight, behavior: "smooth" });
   }, [messages]);
 
   // Handed to the MCP App host, which gives it to `AppBridge.oncalltool`.
@@ -200,10 +205,30 @@ export default function App() {
   const prevFingerprint = useRef(fingerprint);
   useEffect(() => {
     if (fingerprint !== prevFingerprint.current && fingerprint) {
+      if (drawerOpen) {
+        // Drawer is already open — content updates silently.
+      } else {
+        // Drawer closed — show badge so the user knows results changed.
+        setDrawerBadge((b) => b + 1);
+      }
       setDrawerOpen(true);
     }
     prevFingerprint.current = fingerprint;
-  }, [fingerprint]);
+  }, [fingerprint, drawerOpen]);
+
+  // Clear badge when drawer opens.
+  useEffect(() => {
+    if (drawerOpen) setDrawerBadge(0);
+  }, [drawerOpen]);
+
+  // Escape key closes the drawer.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && drawerOpen) setDrawerOpen(false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [drawerOpen]);
 
   return (
     <div className="app">
@@ -221,16 +246,42 @@ export default function App() {
 
         <div className="chat-log" data-testid="chat-log" ref={logRef}>
           {messages.length === 0 && (
-            <p className="chat-empty">
-              Tell me what you're after — what you'll use it for, the kind of car,
-              your budget, whether you want to buy or rent, and when you need it.
-            </p>
+            <div className="chat-empty">
+              <p className="chat-empty-text">
+                Tell me what you're looking for, or pick a suggestion:
+              </p>
+              <div className="chat-chips">
+                {[
+                  "I need a family SUV under $25k",
+                  "Show me budget sedans",
+                  "I want a hatchback for road trips",
+                  "Find me a truck for work",
+                ].map((chip) => (
+                  <button
+                    key={chip}
+                    className="chat-chip"
+                    onClick={() => { setInput(chip); }}
+                  >
+                    {chip}
+                  </button>
+                ))}
+              </div>
+            </div>
           )}
           {messages.map((m, i) => (
             <div key={i} className="chat-row" data-role={m.role}>
               <span className="chat-bubble">{m.content}</span>
             </div>
           ))}
+          {typing && (
+            <div className="chat-row" data-role="assistant">
+              <span className="chat-bubble typing-indicator">
+                <span className="typing-dot" />
+                <span className="typing-dot" />
+                <span className="typing-dot" />
+              </span>
+            </div>
+          )}
         </div>
 
         {/* In the chat column, not the surfaces panel (decided 2026-08-08):
@@ -255,8 +306,11 @@ export default function App() {
             onKeyDown={(e) => e.key === "Enter" && send()}
             placeholder="Tell me what car you're looking for..."
           />
-          <button data-testid="chat-send" onClick={send} disabled={!connected}>
-            Send
+          <button data-testid="chat-send" onClick={send} disabled={!connected} aria-label="Send message">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <line x1="5" y1="12" x2="19" y2="12" />
+              <polyline points="12 5 19 12 12 19" />
+            </svg>
           </button>
         </div>
       </div>
@@ -269,6 +323,9 @@ export default function App() {
           aria-label={drawerOpen ? "Close panel" : "Open panel"}
         >
           {drawerOpen ? "\u2715" : "\u2630"}
+          {!drawerOpen && drawerBadge > 0 && (
+            <span className="drawer-badge">{drawerBadge}</span>
+          )}
         </button>
       )}
 

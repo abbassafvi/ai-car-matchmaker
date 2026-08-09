@@ -48,13 +48,24 @@ def test_agent_failure_sends_graceful_error_and_keeps_connection_open(tmp_path, 
 
             ws.send_json({"type": "chat", "content": "hello"})
 
-            error_msg = ws.receive_json()
-            assert error_msg["type"] == "error"
+            # Skip typing events and find the error message.
+            error_msg = None
+            for _ in range(10):
+                msg = ws.receive_json()
+                if msg["type"] == "error":
+                    error_msg = msg
+                    break
+            assert error_msg is not None, "never received an error message"
             assert "message" in error_msg
 
             # Connection must still be usable after a failed turn -- send
             # again (still failing, same monkeypatch) and confirm we get
             # another graceful error rather than a dropped connection.
             ws.send_json({"type": "chat", "content": "still there?"})
-            second_error = ws.receive_json()
-            assert second_error["type"] == "error"
+            second_error = None
+            for _ in range(10):
+                msg = ws.receive_json()
+                if msg["type"] == "error":
+                    second_error = msg
+                    break
+            assert second_error is not None, "never received a second error message"

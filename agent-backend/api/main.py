@@ -929,6 +929,7 @@ async def _run_research_turn(
         session = state.model_dump(mode="json")
 
     narrator = agents.for_phase(Phase(session["phase"]))
+    await websocket.send_json({"type": "typing", "typing": True})
     result = await narrator.ainvoke(
         {"messages": [{"role": "user", "content": narration_brief(outcome)}],
          "session": session},
@@ -936,6 +937,7 @@ async def _run_research_turn(
     )
     session = result["session"]
 
+    await websocket.send_json({"type": "typing", "typing": False})
     await websocket.send_json({
         "type": "chat", "role": "assistant",
         "content": message_text(result["messages"][-1]),
@@ -1123,6 +1125,7 @@ async def chat_ws(websocket: WebSocket, session_id: str):
                 # behind each other (spec.md US5 AS2 requires two sessions
                 # usable at once -- the property T053 established with
                 # asyncio.to_thread, preserved here by different means).
+                await websocket.send_json({"type": "typing", "typing": True})
                 result = await agent.ainvoke(
                     {
                         # The phase line rides *with* the user's message
@@ -1159,6 +1162,7 @@ async def chat_ws(websocket: WebSocket, session_id: str):
             )
             session = result["session"]
 
+            await websocket.send_json({"type": "typing", "typing": False})
             await websocket.send_json({
                 "type": "chat", "role": "assistant",
                 "content": message_text(result["messages"][-1]),

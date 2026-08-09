@@ -906,11 +906,6 @@ async def _run_research_turn(
         state.record_research(outcome.listings, outcome.recommendations)
         session = state.model_dump(mode="json")
 
-        # Render from what was just persisted, not from `outcome`, so the
-        # catalogue on screen is provably the same slate a reconnect will
-        # rebuild from -- one code path, one source of truth.
-        await _send_catalogue(surfaces, session)
-
     narrator = agents.for_phase(Phase(session["phase"]))
     result = await narrator.ainvoke(
         {"messages": [{"role": "user", "content": narration_brief(outcome)}],
@@ -923,6 +918,13 @@ async def _run_research_turn(
         "type": "chat", "role": "assistant",
         "content": message_text(result["messages"][-1]),
     })
+
+    # Catalogue is sent AFTER the narration chat message so the user reads
+    # "I found X listings..." before seeing the cards — otherwise the
+    # sidebar shows car cards before the explanation appears.
+    if not outcome.error:
+        await _send_catalogue(surfaces, session)
+
     return session
 
 

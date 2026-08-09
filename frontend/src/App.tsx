@@ -75,9 +75,10 @@ export default function App() {
         }));
       }),
   );
-  const [surfaces, setSurfaces] = useState(() =>
+  const [rawSurfaces, setSurfaces] = useState(() =>
     Array.from(processor.model.surfacesMap.values()),
   );
+  const [drawerOpen, setDrawerOpen] = useState(false);
 
   useEffect(() => {
     const sync = () => setSurfaces(Array.from(processor.model.surfacesMap.values()));
@@ -175,6 +176,18 @@ export default function App() {
     setInput("");
   };
 
+  const surfaces = rawSurfaces.filter((s) => s.id !== "interview-progress");
+
+  // Auto-open drawer when catalogue first appears
+  const hasCatalogue = surfaces.some((s) => s.id === "catalogue");
+  const prevHasCatalogue = useRef(false);
+  useEffect(() => {
+    if (hasCatalogue && !prevHasCatalogue.current) {
+      setDrawerOpen(true);
+    }
+    prevHasCatalogue.current = hasCatalogue;
+  }, [hasCatalogue]);
+
   return (
     <div className="app">
       <div className="chat">
@@ -230,19 +243,41 @@ export default function App() {
         </div>
       </div>
 
-      <div className="surfaces" data-testid="a2ui-panel">
-        {/* Every surface the agent creates renders here automatically -- the
-            backend can add surfaces (interview progress, reasoning steps,
-            catalogue) without the frontend knowing their names. */}
-        {surfaces.length === 0 && (
-          <p className="surfaces-empty">The agent's progress will appear here.</p>
-        )}
-        {surfaces.map((surface) => (
-          <div key={surface.id} className="a2ui-surface" data-surface-id={surface.id}>
-            <A2uiSurface surface={surface} />
-          </div>
-        ))}
+      {/* Slide-out drawer toggle button */}
+      {surfaces.length > 0 && (
+        <button
+          className="drawer-toggle"
+          onClick={() => setDrawerOpen((o) => !o)}
+          aria-label={drawerOpen ? "Close panel" : "Open panel"}
+        >
+          {drawerOpen ? "\u2715" : "\u2630"}
+        </button>
+      )}
+
+      {/* Slide-out drawer */}
+      <div className={`drawer ${drawerOpen ? "drawer--open" : ""}`}>
+        <div className="drawer-header">
+          <h2 className="drawer-title">Results</h2>
+          <button
+            className="drawer-close"
+            onClick={() => setDrawerOpen(false)}
+            aria-label="Close panel"
+          >
+            {"\u2715"}
+          </button>
+        </div>
+        <div className="drawer-body">
+          {surfaces.map((surface) => (
+            <div key={surface.id} className="a2ui-surface" data-surface-id={surface.id}>
+              <A2uiSurface surface={surface} />
+            </div>
+          ))}
+          {surfaces.length === 0 && (
+            <p className="surfaces-empty">Results will appear here.</p>
+          )}
+        </div>
       </div>
+      {drawerOpen && <div className="drawer-backdrop" onClick={() => setDrawerOpen(false)} />}
     </div>
   );
 }

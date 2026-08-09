@@ -95,6 +95,18 @@ class TransactionType(str, Enum):
     BOTH = "both"
 
 
+def budget_basis_for(transaction_type: "TransactionType | str | None") -> str:
+    """Which price a budget is read against for this intent: "buy" or "rent".
+
+    Mirrors `marketplace.store.price_basis` at the query level. "both" reads
+    as "buy" because that is how the marketplace filters it: a car offered
+    either way is judged on its sale price, and only rent-only listings fall
+    back to the daily rate.
+    """
+    value = getattr(transaction_type, "value", transaction_type)
+    return "rent" if value == "rent" else "buy"
+
+
 class InterviewState(BaseModel):
     use_case: Optional[str] = None
     category: Optional[str] = None
@@ -104,6 +116,30 @@ class InterviewState(BaseModel):
     target_date: Optional[str] = None  # ISO date string; parsed/validated at the tool boundary
     location: Optional[str] = None
     must_have_features: list[str] = Field(default_factory=list)
+
+    # Which price basis `budget_max` was stated against -- "buy" (a purchase
+    # price) or "rent" (a per-day rate). Recorded rather than inferred,
+    # because the two are not interchangeable and the difference is roughly
+    # three orders of magnitude.
+    #
+    # Without it, a budget survived a change of intent and quietly stopped
+    # meaning anything. "I want to lease a Sedan under $30,000" became
+    # transaction_type=rent with budget_max=30000, which the marketplace
+    # then compared against `rent_price_per_day` -- so a filter the user
+    # stated explicitly excluded nothing at all, and they were shown the
+    # whole catalogue as though it had been narrowed for them. A constraint
+    # that is silently discarded is worse than one that is refused.
+    budget_basis: Optional[str] = None
+
+    def budget_is_stale(self) -> bool:
+        """True when `budget_max` was stated for a different price basis.
+
+        A stale budget is treated as *absent* rather than reinterpreted, so
+        the interview asks for it again in the units that now apply.
+        """
+        if self.budget_max is None or self.budget_basis is None:
+            return False
+        return self.budget_basis != budget_basis_for(self.transaction_type)
 
     def missing_slots(self) -> list[str]:
         return [slot for slot in REQUIRED_INTERVIEW_SLOTS if getattr(self, slot) in (None, "")]
@@ -194,6 +230,27 @@ class SessionState(BaseModel):
         current = self.interview.model_dump()
         current.update({k: v for k, v in updates.items() if v is not None})
         self.interview = InterviewState(**current)
+
+        # A budget belongs to the price basis it was stated against, and a
+        # change of intent can invalidate it. Handled here rather than at
+        # the tool, so both doors into the interview (`save_interview_state`
+        # and `refine_search`) get the same rule.
+        if updates.get("budget_max") is not None:
+            # Newly stated: it means whatever the current intent means.
+            self.interview.budget_basis = budget_basis_for(
+                self.interview.transaction_type
+            )
+        elif self.interview.budget_is_stale():
+            # Carried over from the other basis. Dropped, not converted:
+            # there is no honest exchange rate between a sale price and a
+            # daily rate, and reusing the number turns a stated constraint
+            # into one that excludes nothing. Clearing it puts `budget_max`
+            # back in `missing_slots()`, so the interview asks again -- in
+            # the units that now apply.
+            self.interview.budget_max = None
+            self.interview.budget_min = None
+            self.interview.budget_basis = None
+
         if self.interview.is_complete() and self.phase == Phase.INTERVIEWING:
             self.phase = Phase.RESEARCHING
         self._traced(previous, "save_interview_slots")

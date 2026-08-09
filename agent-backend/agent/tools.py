@@ -48,6 +48,20 @@ _TRANSACTION_SYNONYMS = {
 }
 
 
+# The price basis a user's own word implies for any budget they state in the
+# same breath -- which is NOT always the basis of the value we map it to.
+#
+# "Lease" is the case that matters. It maps to `rent`, because a rental is
+# the closest thing this marketplace offers. But someone who says "lease a
+# Sedan under $30,000" is quoting a total commitment, not a day rate: read
+# as a daily budget, $30,000 excludes nothing at all, so an explicitly
+# stated constraint silently becomes no constraint. The mapped *value* and
+# the basis of the *number beside it* have to be tracked separately.
+_BUDGET_BASIS_OF_WORD = {
+    "rent": "rent", "rental": "rent", "renting": "rent", "hire": "rent",
+}
+
+
 def _coerce_transaction_type(value: Optional[str]) -> tuple[Optional[str], Optional[str]]:
     """`(value_to_store, note_for_the_model)`.
 
@@ -69,10 +83,14 @@ def _coerce_transaction_type(value: Optional[str]) -> tuple[Optional[str], Optio
             "Ask the user whether they want to buy, rent, or are open to both."
         )
     if mapped != key:
+        units = "a per-day rate" if mapped == "rent" else "a purchase price"
         return mapped, (
-            f"Recorded '{value}' as '{mapped}' — this marketplace only offers "
-            f"buy, rent, or both. Tell the user plainly that {value} is not "
-            f"available and that you are searching {mapped} listings instead."
+            f"This marketplace does not offer {value}. Tell the user that "
+            f"plainly, in your own words, and say you are searching {mapped} "
+            f"listings instead — do not present {mapped} as though it were "
+            f"what they asked for. Note that a budget for {mapped} is "
+            f"{units}, so if they gave a budget for something else, ask again "
+            f"in those units."
         )
     return mapped, None
 
@@ -101,7 +119,25 @@ def save_interview_state(
     transaction_type must be one of: buy, rent, both.
     """
     session = SessionState.model_validate(state["session"])
+    stated_word = (transaction_type or "").strip().lower()
     transaction_type, note = _coerce_transaction_type(transaction_type)
+
+    # A budget quoted alongside a *coerced* transaction type belongs to the
+    # basis of the word the user actually used, not the one we mapped it to.
+    # "Lease a Sedan under $30,000" arrives as one call: mapped to `rent`,
+    # the $30,000 would be recorded as a per-day rate and would exclude
+    # nothing. Dropping it here puts budget_max back in `missing_slots()`, so
+    # the interview asks for a daily figure instead of inventing one.
+    from agent.state import budget_basis_for
+
+    budget_reset = False
+    if budget_max is not None and transaction_type is not None:
+        stated_basis = _BUDGET_BASIS_OF_WORD.get(stated_word, "buy")
+        if stated_basis != budget_basis_for(transaction_type):
+            budget_max = None
+            budget_min = None
+            budget_reset = True
+
     try:
         session.save_interview_slots(
             use_case=use_case,
@@ -122,12 +158,20 @@ def save_interview_state(
             "value in plainer terms, then call this tool again.",
             tool_call_id=tool_call_id,
         )]})
+    parts = ["Interview state saved."]
+    if note:
+        parts.append(note)
+    if budget_reset:
+        units = "per day" if session.interview.transaction_type \
+            and session.interview.transaction_type.value == "rent" else "in total"
+        parts.append(
+            "Their budget was not recorded, because the figure they gave was "
+            f"for a different kind of transaction. Ask what they want to spend "
+            f"{units}, and do not search until they answer."
+        )
     return Command(update={
         "session": session.model_dump(mode="json"),
-        "messages": [ToolMessage(
-            "Interview state saved." if note is None else f"Interview state saved. {note}",
-            tool_call_id=tool_call_id,
-        )],
+        "messages": [ToolMessage(" ".join(parts), tool_call_id=tool_call_id)],
     })
 
 
@@ -417,7 +461,8 @@ def build_research_tools(marketplace_tools: list) -> list:
         session = SessionState.model_validate(state["session"])
         # Same coercion as `save_interview_state`, for the same reason: this
         # is the second door into the same strict enum.
-        coerced, _note = _coerce_transaction_type(transaction_type)
+        coerced, note = _coerce_transaction_type(transaction_type)
+        had_budget = session.interview.budget_max is not None
         try:
             session.save_interview_slots(
                 use_case=use_case,
@@ -434,6 +479,29 @@ def build_research_tools(marketplace_tools: list) -> list:
                 "still on screen.",
                 tool_call_id=tool_call_id,
             )]})
+
+        # Switching between buying and renting drops a budget that was
+        # stated in the other basis (see `SessionState.save_interview_slots`).
+        # Searching anyway would run with no ceiling at all and return a
+        # slate the user would read as "these fit my budget", so ask first.
+        if had_budget and session.interview.budget_max is None:
+            units = (
+                "per day" if session.interview.transaction_type
+                and session.interview.transaction_type.value == "rent"
+                else "in total"
+            )
+            return Command(update={
+                "session": session.model_dump(mode="json"),
+                "messages": [ToolMessage(
+                    f"{note + ' ' if note else ''}Their previous budget was for "
+                    f"the other kind of transaction, so it no longer applies. "
+                    f"Ask the user what they want to spend {units}, then call "
+                    f"this tool again with the new budget_max. Do not search "
+                    f"until they answer. The previous recommendations are "
+                    f"still on screen.",
+                    tool_call_id=tool_call_id,
+                )],
+            })
 
         outcome = await run_research(
             session.interview.model_dump(mode="json"), marketplace_tools

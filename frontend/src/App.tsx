@@ -40,7 +40,7 @@ export default function App() {
   // Keyed by call_id because replies arrive on the shared socket, out of
   // band and potentially out of order.
   const pendingCalls = useRef(
-    new Map<string, (result: Record<string, unknown>) => void>(),
+    new Map<string, { resolve: (result: Record<string, unknown>) => void; reject: (err: Error) => void }>(),
   );
   // MessageProcessor's 2nd constructor argument is a global ActionListener:
   // it receives every action dispatched by any component on any surface
@@ -106,7 +106,7 @@ export default function App() {
         setConnected(false);
         // Reject every pending tool call so the MCP App does not sit on
         // "Submitting…" forever after a disconnect.
-        for (const [, reject] of pendingCalls.current) {
+        for (const { reject } of pendingCalls.current.values()) {
           reject(new Error("WebSocket closed"));
         }
         pendingCalls.current.clear();
@@ -128,10 +128,10 @@ export default function App() {
         } else if (data.type === "mcp_app") {
           setMcpApp(data as McpAppEnvelope);
         } else if (data.type === "app_tool_result") {
-          const resolve = pendingCalls.current.get(data.call_id);
-          if (resolve) {
+          const pending = pendingCalls.current.get(data.call_id);
+          if (pending) {
             pendingCalls.current.delete(data.call_id);
-            resolve(data.result?.structuredContent ?? {});
+            pending.resolve(data.result?.structuredContent ?? {});
           }
         }
       };
@@ -162,7 +162,7 @@ export default function App() {
         return;
       }
       const callId = crypto.randomUUID();
-      pendingCalls.current.set(callId, resolve);
+      pendingCalls.current.set(callId, { resolve, reject });
       ws.send(JSON.stringify({
         type: "app_tool_call", call_id: callId, name, arguments: args,
       }));

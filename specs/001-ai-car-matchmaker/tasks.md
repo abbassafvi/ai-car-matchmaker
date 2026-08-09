@@ -1145,19 +1145,19 @@ surface.
 
 ### Tests for User Story 4
 
-- [ ] T036 [P] [US4] Test: no card-like pattern appears in DB rows, logs,
+- [x] T036 [P] [US4] Test: no card-like pattern appears in DB rows, logs,
       or OTel span attributes after a mock payment (Principle III)
-- [ ] T037 [P] [US4] Contract test: `open_mock_checkout` unavailable
+- [x] T037 [P] [US4] Contract test: `open_mock_checkout` unavailable
       without a SUBMITTED booking
 
 ### Implementation for User Story 4
 
-- [ ] T038 [US4] `mcp-apps-ui/checkout/`: mock checkout bundle, explicit
+- [x] T038 [US4] `mcp-apps-ui/checkout/`: mock checkout bundle, explicit
       "MOCK — no real payment" labeling
-- [ ] T039 [US4] `mcp-services/payment/`: `open_mock_checkout` (ui://) +
+- [x] T039 [US4] `mcp-services/payment/`: `open_mock_checkout` (ui://) +
       `confirm_mock_payment` — discards payment-like input immediately,
       persists only a synthetic confirmation record
-- [ ] T040 [US4] `agent-backend/agent/graph.py`: AWAITING_PAYMENT →
+- [x] T040 [US4] `agent-backend/agent/graph.py`: AWAITING_PAYMENT →
       CONFIRMED transition, chat summary generated from tool-call record only
 
 **Checkpoint**: Full interview→payment flow works end-to-end without

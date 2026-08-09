@@ -1,0 +1,14 @@
+{
+  "name": "ai-car-matchmaker",
+  "version": "1.0.0",
+  "description": "A multistep AI agent that interviews a user about the car they want to buy or rent, researches a marketplace on their behalf, and presents ranked, explained recommendations — with in-chat booking and mock checkout via MCP Apps, and a live catalogue/progress UI driven by A2UI.",
+  "private": true,
+  "scripts": {
+    "test:e2e": "npx playwright test",
+    "test:e2e:headed": "npx playwright test --headed",
+    "test:e2e:ui": "npx playwright test --ui"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.62.1"
+  }
+}

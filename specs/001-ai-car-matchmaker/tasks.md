@@ -1184,14 +1184,14 @@ leaving the chat window (SC-003).
 
 ## Phase 8: Polish & Cross-Cutting — M5 (observability) / M6 (hardening)
 
-- [ ] T044 [P] Playwright E2E: full interview→payment path, asserting zero
+- [x] T044 [P] Playwright E2E: full interview→payment path, asserting zero
       CSP violations and zero console errors
-- [ ] T045 Verify Phoenix shows a complete trace (LLM calls, tool calls,
+- [x] T045 Verify Phoenix shows a complete trace (LLM calls, tool calls,
       phase transitions) for one full session
-- [ ] T046 [P] Eval set: ~15 synthetic personas scored on SC-001/SC-002
+- [x] T046 [P] Eval set: ~15 synthetic personas scored on SC-001/SC-002
       via Phoenix LLM-as-judge
-- [ ] T047 README finalized as the single source of run instructions
-- [ ] T048 Final Review checklist (plan.md/spec.md) walked and checked off
+- [x] T047 README finalized as the single source of run instructions
+- [x] T048 Final Review checklist (plan.md/spec.md) walked and checked off
 - [x] T049 Slide deck outline drafted —
       `specs/001-ai-car-matchmaker/deck-outline.md`. 11 slides, content
       complete, with speaker notes, a demo script and per-slide evidence.

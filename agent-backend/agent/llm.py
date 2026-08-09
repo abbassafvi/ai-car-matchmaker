@@ -1,4 +1,4 @@
-"""LLM client factory.
+"""LLM client factory with automatic provider fallback.
 
 Provider is selected by env var, so switching provider *or* model stays a
 config change rather than a code change (README and plan.md both make that
@@ -10,6 +10,19 @@ claim -- this module is what makes it true):
   LLM_BASE_URL  openai_compatible only: the /chat/completions base URL
   LLM_MAX_TOKENS   output cap override (DEFAULT_MAX_TOKENS_BY_PROVIDER)
   LLM_MAX_RETRIES  retry budget override (DEFAULT_MAX_RETRIES_BY_PROVIDER)
+
+Fallback provider (activates on rate limit / quota exhaustion):
+
+  LLM_FALLBACK_PROVIDER  "google" | "openai_compatible"
+  LLM_FALLBACK_MODEL     model id for the fallback provider
+  LLM_FALLBACK_API_KEY   credential for the fallback provider
+  LLM_FALLBACK_BASE_URL  openai_compatible only: fallback base URL
+
+When the primary provider returns 429 (rate limit) or 403 (quota
+exceeded), the FallbackModel transparently retries on the secondary
+provider. This is critical for demos: Groq's 8000 TPM limit is hit
+quickly with 10 tool schemas per request, and Vertex AI has its own
+quotas. Dual-provider ensures at least one path is always available.
 
 Why "google" is the default rather than Gemini's OpenAI-compatibility
 endpoint, which would have been the smaller change:
@@ -30,7 +43,112 @@ path is unusable for Gemini 3.x -- it is kept only for other providers.
 """
 from __future__ import annotations
 
+import logging
 import os
+
+from langchain_core.language_models import BaseChatModel
+from langchain_core.messages import BaseMessage
+from pydantic import ConfigDict
+
+log = logging.getLogger(__name__)
+
+
+class FallbackModel(BaseChatModel):
+    """Wraps a primary and fallback model, switching on rate-limit errors.
+
+    When the primary provider returns 429 (rate limit) or 403 (quota
+    exceeded), the request is transparently retried on the fallback provider.
+    This is the cheapest way to survive a quota exhaustion during a demo
+    without manual intervention.
+
+    The fallback is only attempted once per request -- if both providers
+    fail, the fallback's error is raised. This prevents infinite loops
+    where both providers are down.
+    """
+
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
+    primary: BaseChatModel
+    fallback: BaseChatModel
+    _fallback_used: bool = False
+
+    @property
+    def _llm_type(self) -> str:
+        return f"fallback({self.primary._llm_type}/{self.fallback._llm_type})"
+
+    @property
+    def _identifying_params(self) -> dict:
+        return {
+            "primary": self.primary._identifying_params,
+            "fallback": self.fallback._identifying_params,
+        }
+
+    def _generate(
+        self,
+        messages: list[BaseMessage],
+        stop: list[str] | None = None,
+        run_manager=None,
+        **kwargs,
+    ):
+        try:
+            return self.primary._generate(messages, stop=stop, run_manager=run_manager, **kwargs)
+        except Exception as e:
+            if self._is_rate_limit_error(e):
+                log.warning(
+                    "Primary provider rate-limited (%s), falling back to secondary",
+                    type(e).__name__,
+                )
+                self._fallback_used = True
+                return self.fallback._generate(messages, stop=stop, run_manager=run_manager, **kwargs)
+            raise
+
+    async def _agenerate(
+        self,
+        messages: list[BaseMessage],
+        stop: list[str] | None = None,
+        run_manager=None,
+        **kwargs,
+    ):
+        try:
+            return await self.primary._agenerate(
+                messages, stop=stop, run_manager=run_manager, **kwargs
+            )
+        except Exception as e:
+            if self._is_rate_limit_error(e):
+                log.warning(
+                    "Primary provider rate-limited (%s), falling back to secondary",
+                    type(e).__name__,
+                )
+                self._fallback_used = True
+                return await self.fallback._agenerate(
+                    messages, stop=stop, run_manager=run_manager, **kwargs
+                )
+            raise
+
+    def _is_rate_limit_error(self, exc: Exception) -> bool:
+        """Check if the exception is a rate limit or quota error."""
+        exc_str = str(exc).lower()
+        exc_type = type(exc).__name__
+
+        # OpenAI/Groq rate limits
+        if "ratelimiterror" in exc_type.lower() or "rate limit" in exc_str:
+            return True
+        if "429" in exc_str:
+            return True
+        if "quota" in exc_str:
+            return True
+        if "tokens per minute" in exc_str:
+            return True
+
+        # Google/Vertex quota errors
+        if "resourceexhausted" in exc_type.lower():
+            return True
+        if "403" in exc_str and "quota" in exc_str:
+            return True
+        if "requests per day" in exc_str:
+            return True
+
+        return False
 
 DEFAULT_PROVIDER = "google"
 DEFAULT_MODEL = "gemini-3.6-flash"
@@ -106,23 +224,68 @@ def is_configured() -> bool:
     return bool(os.environ.get("LLM_API_KEY"))
 
 
-def build_model(max_tokens: int | None = None):
+def build_model(max_tokens: int | None = None) -> BaseChatModel:
     """Build the chat model for the configured provider.
+
+    If LLM_FALLBACK_PROVIDER is set, returns a FallbackModel that
+    automatically retries on the fallback provider when the primary
+    hits a rate limit or quota error.
 
     `max_tokens=None` means "use the right default for this provider" (see
     DEFAULT_MAX_TOKENS_BY_PROVIDER). `LLM_MAX_TOKENS` overrides it from the
     environment so a rate-limit ceiling can be tuned without a code change,
     matching how provider and model are already configured.
     """
-    api_key = os.environ.get("LLM_API_KEY")
+    primary = _build_single_model(max_tokens)
+
+    fallback_provider = os.environ.get("LLM_FALLBACK_PROVIDER")
+    if not fallback_provider:
+        return primary
+
+    fallback_api_key = os.environ.get("LLM_FALLBACK_API_KEY")
+    if not fallback_api_key:
+        log.warning(
+            "LLM_FALLBACK_PROVIDER set but LLM_FALLBACK_API_KEY missing; "
+            "fallback disabled"
+        )
+        return primary
+
+    try:
+        fallback = _build_single_model(
+            max_tokens=None,
+            provider=fallback_provider,
+            model=os.environ.get("LLM_FALLBACK_MODEL"),
+            api_key=fallback_api_key,
+            base_url=os.environ.get("LLM_FALLBACK_BASE_URL"),
+        )
+        log.info(
+            "LLM fallback configured: %s -> %s",
+            os.environ.get("LLM_PROVIDER", DEFAULT_PROVIDER),
+            fallback_provider,
+        )
+        return FallbackModel(primary=primary, fallback=fallback)
+    except Exception:
+        log.exception("Failed to build fallback model; primary only")
+        return primary
+
+
+def _build_single_model(
+    max_tokens: int | None = None,
+    provider: str | None = None,
+    model: str | None = None,
+    api_key: str | None = None,
+    base_url: str | None = None,
+) -> BaseChatModel:
+    """Build a single provider model (no fallback)."""
+    api_key = api_key or os.environ.get("LLM_API_KEY")
     if not api_key:
         raise LLMNotConfiguredError(
             "LLM_API_KEY is not set. Copy agent-backend/.env.example to "
             "agent-backend/.env and fill it in, or export it in your shell."
         )
 
-    provider = os.environ.get("LLM_PROVIDER", DEFAULT_PROVIDER).lower()
-    model = os.environ.get("LLM_MODEL", DEFAULT_MODEL)
+    provider = (provider or os.environ.get("LLM_PROVIDER", DEFAULT_PROVIDER)).lower()
+    model = model or os.environ.get("LLM_MODEL", DEFAULT_MODEL)
 
     if max_tokens is None:
         env_override = os.environ.get("LLM_MAX_TOKENS")
@@ -145,7 +308,7 @@ def build_model(max_tokens: int | None = None):
         from langchain_openai import ChatOpenAI
 
         return ChatOpenAI(
-            base_url=os.environ.get("LLM_BASE_URL", DEFAULT_OPENAI_BASE_URL),
+            base_url=base_url or os.environ.get("LLM_BASE_URL", DEFAULT_OPENAI_BASE_URL),
             api_key=api_key,
             model=model,
             max_tokens=max_tokens,

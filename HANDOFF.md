@@ -1359,9 +1359,12 @@ see §5. Consequences for M4a onward:
   `LLM_PROVIDER=google` (langchain-google-genai) talks to the latter, so
   it may 403. **Try it before demo day, not during** — §5's whole point
   is that provider surprises show up at the worst moment.
-  ⚠️ It shares the `AQ.Ab8RN6` prefix with the first Gemini key and is a
-  **different key**. A prefix match is not evidence a key is already
-  configured.
+  ⚠️ The two Gemini keys share a common leading prefix (Google keys of
+  this type do) and are nevertheless **different keys**. A prefix match is
+  not evidence a key is already configured -- a guard that compared only
+  the first few characters rejected the write on that basis once. The
+  literal prefix is deliberately not quoted here: this repo is public, and
+  there is no reason for anything key-shaped to sit in it.
 
 ---
 

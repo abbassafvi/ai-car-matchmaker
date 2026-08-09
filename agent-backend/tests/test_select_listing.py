@@ -553,3 +553,78 @@ async def test_an_ordinary_question_turn_does_not_re_send_the_catalogue():
     )
 
     assert socket.sent == []
+
+
+# ---------------------------------------------------------------------------
+# cancel_selection
+# ---------------------------------------------------------------------------
+
+def _form_filling_session():
+    """A session with a listing selected and the booking form open."""
+    s = results_ready_session()
+    s.select_listing("LST-0001")
+    assert s.phase == Phase.FORM_FILLING
+    return s
+
+
+def _awaiting_payment_session():
+    """A session that has submitted a booking and is waiting for payment."""
+    from agent.state import Booking
+    s = _form_filling_session()
+    booking = Booking(
+        id="BK-0001",
+        listing_id="LST-0001",
+        session_id=s.session_id,
+    )
+    s.submit_booking(booking)
+    assert s.phase == Phase.AWAITING_PAYMENT
+    return s
+
+
+class TestCancelSelection:
+    """cancel_selection resets phase and clears booking state."""
+
+    def test_cancel_from_form_filling(self):
+        s = _form_filling_session()
+        s.cancel_selection()
+        assert s.phase == Phase.RESULTS_READY
+        assert s.selected_listing_id is None
+        assert s.booking is None
+
+    def test_cancel_from_awaiting_payment(self):
+        s = _awaiting_payment_session()
+        s.cancel_selection()
+        assert s.phase == Phase.RESULTS_READY
+        assert s.selected_listing_id is None
+        assert s.booking is None
+
+    def test_cancel_preserves_candidate_slate(self):
+        s = _form_filling_session()
+        original_ids = s.candidate_ids()
+        s.cancel_selection()
+        assert s.candidate_ids() == original_ids
+
+    def test_cancel_ignored_in_results_ready(self):
+        s = results_ready_session()
+        s.cancel_selection()
+        assert s.phase == Phase.RESULTS_READY
+
+    def test_cancel_ignored_in_interviewing(self):
+        s = SessionState(session_id="test-cancel-interview")
+        s.cancel_selection()
+        assert s.phase == Phase.INTERVIEWING
+
+    def test_cancel_ignored_in_confirmed(self):
+        from agent.state import Booking
+        s = _awaiting_payment_session()
+        s.phase = Phase.CONFIRMED
+        s.cancel_selection()
+        assert s.phase == Phase.CONFIRMED
+
+    def test_can_reselect_after_cancel(self):
+        s = _form_filling_session()
+        s.cancel_selection()
+        assert s.phase == Phase.RESULTS_READY
+        s.select_listing("LST-0002")
+        assert s.phase == Phase.FORM_FILLING
+        assert s.selected_listing_id == "LST-0002"

@@ -54,6 +54,8 @@ type Props = {
   envelope: McpAppEnvelope;
   /** Tunnels the App's tool call over the chat WebSocket. */
   onCallTool: CallServerTool;
+  /** Called when the user clicks the cancel/dismiss button. */
+  onCancel?: () => void;
 };
 
 const HOST_INFO = { name: "ai-car-matchmaker", version: "1.0.0" };
@@ -91,7 +93,7 @@ const THEME_VARIABLES = {
   "--color-ring-primary": "#0b63ce",
 } satisfies Partial<McpUiStyles>;
 
-export default function McpAppFrame({ envelope, onCallTool }: Props) {
+export default function McpAppFrame({ envelope, onCallTool, onCancel }: Props) {
   const frameRef = useRef<HTMLIFrameElement | null>(null);
   // The callback is read at call time rather than captured, so the bridge
   // does not have to be torn down and rebuilt (losing the App's state, and
@@ -178,6 +180,11 @@ export default function McpAppFrame({ envelope, onCallTool }: Props) {
 
   return (
     <div className="mcp-app" data-app={envelope.app} data-testid="mcp-app-frame">
+      {onCancel && (
+        <button className="mcp-app-cancel" onClick={onCancel} aria-label="Cancel">
+          {"\u2715"}
+        </button>
+      )}
       <iframe
         ref={frameRef}
         title="Booking form"

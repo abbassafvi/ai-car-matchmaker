@@ -40,6 +40,11 @@ CATALOGUE_SURFACE_ID = "catalogue"
 # "I'll take the Jeep" cannot diverge in behaviour.
 SELECT_LISTING_ACTION = "select_listing"
 
+# Cancel action sent by the frontend when the user dismisses a booking form
+# or checkout card.  Resets the session back to RESULTS_READY so they can
+# pick a different car or change preferences.
+CANCEL_SELECTION_ACTION = "cancel_selection"
+
 # Icons are inline SVG path data, not catalog icon names.
 #
 # A2UI v0.9's `Icon.name` accepts either a name from a fixed enum or an

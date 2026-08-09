@@ -62,6 +62,7 @@ from agent.mcp_client import (  # noqa: E402
 )
 from agent.render_a2ui import (  # noqa: E402
     CATALOGUE_SURFACE_ID,
+    CANCEL_SELECTION_ACTION,
     INTERVIEW_SURFACE_ID,
     REASONING_SURFACE_ID,
     SELECT_LISTING_ACTION,
@@ -643,8 +644,29 @@ async def _handle_action(
     slate, so a tampered or stale id cannot select a listing that was never
     recommended.
     """
-    if incoming.get("name") != SELECT_LISTING_ACTION:
-        log.warning("Ignoring unknown UI action %r", incoming.get("name"))
+    name = incoming.get("name")
+
+    # --- cancel_selection: dismiss booking / checkout card ---------------
+    if name == CANCEL_SELECTION_ACTION:
+        state = SessionState.model_validate(session)
+        state.cancel_selection()
+        session = state.model_dump(mode="json")
+        await _persist_session(agents, config, session)
+        await _send_catalogue(surfaces, session)
+        await websocket.send_json({
+            "type": "chat",
+            "role": "assistant",
+            "content": (
+                "No worries — selection cancelled. "
+                "Pick another car below, or tell me if you'd like to "
+                "change your preferences."
+            ),
+        })
+        return session
+
+    # --- select_listing --------------------------------------------------
+    if name != SELECT_LISTING_ACTION:
+        log.warning("Ignoring unknown UI action %r", name)
         return session
 
     listing_id = (incoming.get("context") or {}).get("listing_id")

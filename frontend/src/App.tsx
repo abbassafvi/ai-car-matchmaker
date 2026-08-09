@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { MessageProcessor } from "@a2ui/web_core/v0_9";
 import { A2uiSurface, basicCatalog } from "@a2ui/react/v0_9";
 import McpAppFrame from "./mcp-app-host/McpAppFrame";
@@ -89,6 +89,16 @@ export default function App() {
       deletedSub.unsubscribe();
     };
   }, [processor]);
+
+  // Cancel handler: clears the booking/checkout card and sends a
+  // cancel_selection action so the backend resets the phase.
+  const handleCancelMcpApp = useCallback(() => {
+    setMcpApp(null);
+    const ws = wsRef.current;
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ type: "action", name: "cancel_selection", context: {} }));
+    }
+  }, []);
 
   useEffect(() => {
     let retries = 0;
@@ -226,6 +236,7 @@ export default function App() {
             key={JSON.stringify(mcpApp.toolInput)}
             envelope={mcpApp}
             onCallTool={callServerTool}
+            onCancel={handleCancelMcpApp}
           />
         )}
 

@@ -320,6 +320,25 @@ class SessionState(BaseModel):
         self._traced(previous, "select_listing")
         return self
 
+    def cancel_selection(self) -> "SessionState":
+        """Discard the current selection and booking, return to RESULTS_READY.
+
+        Callable from FORM_FILLING or AWAITING_PAYMENT: the user may dismiss
+        the booking form or the payment checkout at any time and pick a
+        different car (or change preferences entirely).  Resets the session
+        to the same state it was in before ``select_listing`` was called,
+        keeping the candidate slate intact so the user can still pick from
+        the results.
+        """
+        previous = self.phase
+        if self.phase not in (Phase.FORM_FILLING, Phase.AWAITING_PAYMENT):
+            return self
+        self.selected_listing_id = None
+        self.booking = None
+        self.phase = Phase.RESULTS_READY
+        self._traced(previous, "cancel_selection")
+        return self
+
     def submit_booking(self, booking: "Booking") -> "SessionState":
         """Record a submitted booking and advance to AWAITING_PAYMENT.
 

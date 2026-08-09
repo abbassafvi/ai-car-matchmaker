@@ -1,0 +1,12 @@
+{
+  "sources": {
+    "src/main.ts": "144ad85f8043afe74293b2be491053b8550848fe779005c460747918f9e89530",
+    "src/styles.css": "5137ba871084923923ac5b1a9ff3147f288440fb9d24ef01cbd3dd2cb7804492",
+    "index.html": "dc7dae2b21caebda34afa5c718a2f358cfd4a997ad747967eeaf21b5c50fafd6",
+    "vite.config.ts": "fb8d1195b29089ce3934cf1f121d6476b4c920554214bd035f69e65374e75080",
+    "package.json": "4bddfc01d3b4047d1b5c9fd5854245550be0f25577236baf398696d4f5dd7575",
+    "../scripts/install-bundle.mjs": "1db2574ff583f595b31ef3143be1b06fe42638f4ccf17f3aab1cb36b1bf6bbca"
+  },
+  "bundle_sha256": "4cbb5ea8968f55e660860cb95c456ce5d4cacec7ffcd55a3b2615ffc23973a8a",
+  "bytes": 267142
+}

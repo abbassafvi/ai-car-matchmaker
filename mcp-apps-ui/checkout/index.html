@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!--
+      Defence in depth. The host already sandboxes this document (an iframe
+      with allow-scripts but NOT allow-same-origin, so the origin is opaque)
+      and the ui:// resource declares an empty connectDomains/resourceDomains
+      CSP. This meta tag makes the same promise from inside the document, so
+      the checkout is deny-by-default even if it is ever rendered by a host
+      that ignores resource metadata -- spec.md US4 AS1.
+
+      It matters more here than on the booking form. This document is the one
+      the user types card-like values into, and `default-src 'none'` plus
+      `connect-src 'none'` is what makes "nothing leaves this iframe" a
+      browser-enforced property rather than a promise in a code comment: even
+      a compromised bundle has nowhere to send anything. `form-action 'none'`
+      closes the other exit, a native form POST.
+
+      'unsafe-inline' on script/style is unavoidable and safe here: the whole
+      point of a single-file MCP App is that its script and styles ARE
+      inline, and default-src 'none' means they can reach nothing.
+    -->
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; connect-src 'none'; form-action 'none'; base-uri 'none'"
+    />
+    <title>Mock checkout</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

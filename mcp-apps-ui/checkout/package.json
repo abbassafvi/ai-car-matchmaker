@@ -1,0 +1,32 @@
+{
+  "name": "checkout-mcp-app",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "description": "T038 — the in-chat mock checkout, built as an MCP App (hackathon hard requirement #4). Builds to ONE self-contained HTML file, because the host renders it in an iframe sandboxed without allow-same-origin: the document has an opaque origin and cannot fetch a sibling script, stylesheet or font. Card-like input is entered here, authorized here, and never leaves this document (Constitution Principle III).",
+  "scripts": {
+    "build": "vite build && node ../scripts/install-bundle.mjs",
+    "dev": "vite"
+  },
+  "mcpApp": {
+    "target": "../../mcp-services/payment/static/checkout.html",
+    "sources": [
+      "src/main.ts",
+      "src/styles.css",
+      "index.html",
+      "vite.config.ts",
+      "package.json"
+    ],
+    "requires": ["confirm_mock_payment"]
+  },
+  "dependencies": {
+    "@modelcontextprotocol/ext-apps": "^1.7.5"
+  },
+  "devDependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "typescript": "^5.9.3",
+    "vite": "^8.0.0",
+    "vite-plugin-singlefile": "^2.3.3",
+    "zod": "^3.25.76"
+  }
+}

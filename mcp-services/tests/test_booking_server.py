@@ -215,10 +215,50 @@ def test_the_bundle_declares_a_deny_by_default_csp():
     """spec.md US3 AS1, asserted inside the document as well as on the
     resource metadata -- a host that ignores resource `_meta` still gets a
     locked-down document.
+
+    ⚠️ This test was **vacuous as shipped in M4a**, and stayed that way
+    through Phase E. It asserted `"default-src 'none'" in html`, and that
+    literal string also appears in the explanatory HTML comment above the
+    meta tag (vite preserves comments), so deleting the directive from the
+    tag itself left the test green. Found in M4b by mutating the *checkout*
+    bundle's identical assertion and noticing it did not go red.
+
+    §3's own lesson 1, inside the suite that exists to enforce §3: an
+    assertion that the document *mentions* a rule proves the rule was
+    written down, not that it is in force. So the tag is parsed now.
     """
-    html = FORM_HTML_PATH.read_text()
-    assert "Content-Security-Policy" in html
-    assert "default-src 'none'" in html
+    directives = _csp_directives(FORM_HTML_PATH.read_text())
+    assert directives.get("default-src") == "'none'"
+    assert directives.get("form-action") == "'none'"
+    assert directives.get("base-uri") == "'none'"
+
+
+def _csp_directives(html: str) -> dict[str, str]:
+    """Parse the document's own CSP meta tag into {directive: value}.
+
+    Duplicated in test_payment_server.py rather than shared: these two
+    files pin two independently-shipped artifacts, and a shared helper
+    would let one App's test changes silently alter what the other App is
+    asserted to guarantee.
+    """
+    # The opening quote is captured and back-referenced, NOT expressed as
+    # a negated character class. A CSP value is full of single quotes
+    # ("'none'", "'unsafe-inline'"), so `content=["\']([^"\']+)["\']`
+    # stops dead at the first one and yields {'default-src': ''} -- which
+    # then fails against every expected value for a reason that has
+    # nothing to do with the bundle. §3 lesson 15: test the test's parser.
+    match = re.search(
+        r'<meta[^>]+http-equiv=["\']Content-Security-Policy["\'][^>]+content=(["\'])(.*?)\1',
+        html,
+        re.IGNORECASE | re.DOTALL,
+    )
+    assert match, "the bundle has no Content-Security-Policy meta tag"
+    directives: dict[str, str] = {}
+    for part in match.group(2).split(";"):
+        tokens = part.split()
+        if tokens:
+            directives[tokens[0]] = " ".join(tokens[1:])
+    return directives
 
 
 def test_the_bundle_has_no_payment_input():

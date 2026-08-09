@@ -43,6 +43,41 @@ CARD_PAYLOAD = {
     "iban": "GB33BUKB20201555555555",
 }
 
+# Long enough that finding one in some output is evidence of a leak rather
+# than a coincidence.
+#
+# This distinction was not foreseen -- it was found by the suite going red
+# on a run that should have been green. `"456"` (the CVC) turned up inside
+# a randomly generated confirmation id, `PMT-1193456190`. The assertion was
+# substring-based and the identifiers are random, so it was **flaky by
+# construction**: it would have passed almost always and failed
+# occasionally, in CI, for a reason that looks exactly like a Principle III
+# breach. A test that goes red for the wrong reason is worse than no test,
+# because these are the tests whose job is to be believed when they go red
+# (§8.32's argument for the quota-skip, in a new place).
+#
+# Short values are still covered -- just structurally rather than by
+# substring: `normalise()` returns {} and the confirmation record has an
+# exact five-key shape, so there is nowhere for a three-digit CVC to hide.
+DISTINCTIVE_CARD_VALUES = [
+    value for value in CARD_PAYLOAD.values() if len(value.replace(" ", "")) >= 10
+]
+
+
+def assert_no_payment_data_leaked(rendered: str) -> None:
+    """No distinctive submitted value, and no card-shaped digit run.
+
+    Shared by this module and `test_payment_server.py` so the definition
+    of "leaked" is written once. §3 lesson 15 applies to it directly, so
+    `test_the_leak_detector_catches_a_real_leak` below proves it fails
+    when it should.
+    """
+    for value in DISTINCTIVE_CARD_VALUES:
+        assert value not in rendered, f"{value!r} survived into: {rendered}"
+    assert not store.looks_like_a_card_number(rendered), (
+        f"a card-shaped digit run survived into: {rendered}"
+    )
+
 
 # --- 1. the allowlist drops payment-shaped input --------------------------
 
@@ -68,11 +103,43 @@ def test_no_card_digit_survives_normalisation():
     a card number under an innocent-looking key, and an emptiness check
     against `PAYMENT_FIELDS` would follow the allowlist rather than
     contradict it.
+
+    Every value can be checked here, short ones included: the output of
+    `normalise()` contains no random identifiers, so there is nothing for
+    a three-digit CVC to coincide with.
     """
     survived = str(store.normalise(CARD_PAYLOAD))
     for value in CARD_PAYLOAD.values():
         assert value not in survived
     assert not store.looks_like_a_card_number(survived)
+
+
+def test_the_leak_detector_catches_a_real_leak():
+    """§3 lesson 15, on the helper the whole milestone leans on.
+
+    `assert_no_payment_data_leaked` is now the definition of "no payment
+    data got out", used here and in the server tests and, in Phase E, over
+    a Phoenix span dump. A version of it that quietly matched nothing
+    would make every one of those assertions vacuous -- so it has to fail
+    on output that genuinely does leak.
+    """
+    import pytest
+
+    for leaked in (
+        "{'note': '4111111111111111'}",          # a bare PAN
+        "{'note': '4111 1111 1111 1111'}",       # grouped, as typed
+        f"{{'iban': '{CARD_PAYLOAD['iban']}'}}",  # a distinctive non-card value
+    ):
+        with pytest.raises(AssertionError):
+            assert_no_payment_data_leaked(leaked)
+
+    # ...and must not fire on output that only *looks* alarming: a random
+    # confirmation id containing three digits that happen to match a CVC
+    # is the false positive that made this refactor necessary.
+    assert_no_payment_data_leaked(
+        "{'id': 'PMT-1193456190', 'confirmation_code': 'TE7D-46NF-SF6J', "
+        "'created_at': '2026-08-09T08:36:28.789652+00:00'}"
+    )
 
 
 def test_normalise_tolerates_nothing_and_nonsense():
@@ -213,7 +280,9 @@ def test_a_confirmation_built_after_a_hostile_submission_is_clean():
     store.authorise(CARD_PAYLOAD)
     confirmation = store.new_confirmation("BKG-1A2B3C4D5E")
 
-    rendered = str(confirmation)
-    for value in CARD_PAYLOAD.values():
-        assert value not in rendered
-    assert not store.looks_like_a_card_number(rendered)
+    assert_no_payment_data_leaked(str(confirmation))
+    # The structural half, which is what covers the short values: there is
+    # no key a CVC could be hiding under.
+    assert set(confirmation) == {
+        "id", "booking_id", "confirmation_code", "status", "created_at",
+    }

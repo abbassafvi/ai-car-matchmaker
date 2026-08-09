@@ -178,7 +178,7 @@ still re-raises.
 - **Agent harness**: [LangChain DeepAgents](https://docs.langchain.com/labs/deep-agents/overview) (LangGraph)
 - **LLM provider**: config, not code. `LLM_PROVIDER=google` uses [Google Gemini](https://ai.google.dev/) via the native `langchain-google-genai` client (default `gemini-3.6-flash`); `LLM_PROVIDER=openai_compatible` uses any OpenAI-compatible API. Development runs on [Groq](https://groq.com/) (`openai/gpt-oss-120b`), keeping the scarce Gemini quota for demo rehearsal. Groq's free tier is generous on request count but capped at **200,000 tokens/day** — roughly 66 agent turns here, since the DeepAgents harness binds ~2,700 tokens of tool schemas into every request
 - **Tool protocol**: [MCP](https://modelcontextprotocol.io/) (Python SDK, Streamable HTTP) — marketplace **and** booking servers live at `/mcp` and `/booking/mcp`; payment in M4b
-- **In-chat transactional UI**: [MCP Apps](https://apps.extensions.modelcontextprotocol.io/) (`@modelcontextprotocol/ext-apps` 1.7.5) — the booking form is built and served as a `ui://` resource; rendering it in the chat and the mock checkout are the rest of M4
+- **In-chat transactional UI**: [MCP Apps](https://apps.extensions.modelcontextprotocol.io/) (`@modelcontextprotocol/ext-apps` 1.7.5) — the booking form is built, served as a `ui://` resource and **rendered in the chat** (M4a, complete); the mock checkout is M4b, in progress
 - **Generative UI**: [A2UI](https://a2ui.org/) v0.9 protocol via the real [`@a2ui/react`](https://www.npmjs.com/package/@a2ui/react) renderer — car catalogue + live agent progress/reasoning
 - **Observability**: [Arize Phoenix](https://arize.com/docs/phoenix) via OpenTelemetry
 - **Spec process**: [spec-kit](https://github.com/github/spec-kit)

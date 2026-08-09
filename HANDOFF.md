@@ -626,7 +626,7 @@ a scan that only covered two of those leaked a key into a transcript once.
 - **OpenRouter is exhausted** (free tier, ~$0 left). **NVIDIA NIM did not
   work here** (non-streaming `/chat/completions` returned nothing in 120s).
 
-🔴 **Four API keys (Gemini, two Groq, NVIDIA NIM) have been pasted into chat
+🔴 **Five API keys (TWO Gemini, two Groq, NVIDIA NIM) have been pasted into chat
 transcripts and should be rotated after the demo.** None was ever committed.
 The second Groq key was supplied mid-session on 2026-08-08 to finish Phase
 F's live sweep after the first key's daily tokens ran out; it lives only in
@@ -1170,11 +1170,35 @@ inside its panel. The handshake demonstrably completes.
 
 M4a is done, so the pattern is now established rather than speculative.
 M4b should be markedly cheaper: `mcp-services/payment/` mounts at
-`/payment/mcp` beside the other two (`app.py::compose` already takes a
-list), `mcp-apps-ui/checkout/` builds the same self-contained way, and the
-frontend host is **already generic** — it renders whatever `mcp_app`
-envelope arrives, so a second App needs no new frontend code beyond
-deciding where it sits.
+`/payment/mcp` beside the other two, `mcp-apps-ui/checkout/` builds the
+same self-contained way, and the frontend host renders whatever `mcp_app`
+envelope arrives.
+
+⚠️ **Two claims in the original version of that paragraph were wrong when
+written. Both were caught during M4b and are recorded here rather than
+quietly edited away (§12):**
+
+- *"`app.py::compose` already takes a list"* — **false.** It was
+  `compose(marketplace_app, booking_app)`: two named positional
+  parameters with their prefixes hardcoded inside, so a third server
+  needed a real signature change. It **is** variadic over `(prefix, app)`
+  pairs now, and the "`Mount("")` must be last" trap is an enforced
+  invariant instead of a comment — a third mount is precisely the edit
+  that appends below the root mount, and the failure mode is a server
+  that is silently unreachable while its own health route still answers.
+  This is §3's "a doc wrong about a *procedure* it recommended": prose
+  describing future work is untested by construction.
+- *"the frontend host is **already generic** … needs no new frontend
+  code"* — **~90% true, and the missing 10% is the risky part.**
+  `McpAppFrame` hardcodes `title="Booking form"`, and its effect is keyed
+  on `[envelope.resource.html, envelope.toolResult]` against a
+  **persistent iframe DOM node**. Booking never changed `resource.html`
+  within a session (re-selection changes only `toolResult`, so the bridge
+  reconnects to an already-loaded document). Swapping booking → checkout
+  changes `srcDoc`, which replaces the document *asynchronously*, while
+  the effect runs synchronously at commit and hands
+  `PostMessageTransport` the outgoing window. That path has never run —
+  "nobody could have run it yet" again. Addressed in Phase C2.
 
 Read before starting:
 
@@ -1324,10 +1348,20 @@ see §5. Consequences for M4a onward:
   avoid regenerating the dataset in the same pass as the catalogue.
   Re-measured 2026-08-08 across target dates: SUV/≤$25k/buy matches **1**
   by 2026-09-30, **1** by 2026-10-31, **4** by 2026-12-31.
-- 🔴 **Rotate all four API keys** (Gemini, **two** Groq, NVIDIA NIM) after the
+- 🔴 **Rotate all five API keys** (**two** Gemini, **two** Groq, NVIDIA NIM) after the
   demo — all have been pasted into chat transcripts. None was ever committed.
   The second Groq key was added 2026-08-08 during Phase F; it is the one
   currently in `agent-backend/.env`.
+  A **second Gemini key** was added 2026-08-09 during M4b Phase B as a
+  Groq-quota fallback, described by the user as a "vertex gemini" key.
+  It sits as a commented block in `.env` and is **UNVERIFIED**: Vertex AI
+  and the Generative Language API are different backends, and
+  `LLM_PROVIDER=google` (langchain-google-genai) talks to the latter, so
+  it may 403. **Try it before demo day, not during** — §5's whole point
+  is that provider surprises show up at the worst moment.
+  ⚠️ It shares the `AQ.Ab8RN6` prefix with the first Gemini key and is a
+  **different key**. A prefix match is not evidence a key is already
+  configured.
 
 ---
 
@@ -1482,7 +1516,9 @@ valuable section here.
    it as a worked example rather than a to-do
 4. **`specs/001-ai-car-matchmaker/tasks.md`** — task state + per-task
    findings. **Phase 5 = M4a, all of T030–T035 now checked** with the
-   findings recorded under each; **Phase 6 = M4b, T036–T041**
+   findings recorded under each; **Phase 6 = M4b, T036–T040**
+   (an earlier tiering said T036–T041; **T041 is Phase 7 / M4c**, the
+   kill-and-restart resume test. M4b is five tasks, not six)
 5. **`specs/001-ai-car-matchmaker/plan.md`** — architecture + the
    Constitution Check table (**all eight** correction blocks)
 6. **`README.md`** — run instructions, including `npm test` for the
@@ -1717,4 +1753,4 @@ unequal privileges, and only one updates state.**
 >   before touching a surface.
 > - Outbound POSTs to LLM providers fail inside the default tool sandbox;
 >   live-LLM commands need `dangerouslyDisableSandbox: true`.
-> - **Rotate the four API keys after the demo** (§5). Still outstanding.
+> - **Rotate the five API keys after the demo** (§5). Still outstanding.

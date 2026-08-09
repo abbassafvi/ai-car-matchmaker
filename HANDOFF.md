@@ -178,7 +178,7 @@ a trailing `docs:` commit that stamps this section cannot list its own sha,
 so this block may lag HEAD by one or two docs-only commits — check
 `git log --oneline -5` rather than trusting it:
 ```
-(this docs: commit)  docs: hand off the M4a-complete state, re-tier for M4b
+f0d82a7  docs: hand off the M4a-complete state, re-tier §13 for M4b
 bbeae52  M4a Phase E: full-stack verify, and the four defects a conversation found
 070dfd6  M4a Phase D (T034): the booking form renders in the chat, for real
 2d87a0c  M4a Phase C2: the MCP App wire, both directions

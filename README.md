@@ -30,13 +30,15 @@ discovery, and the WebSocket bridge that carries the App and its
 `tools/call` both ways) — **and the form now renders in the chat as a real
 MCP App**: a sandboxed iframe, pre-filled from the search record, which
 validates server-side and books without leaving the conversation. That is
-hackathon requirement #3 met end to end. M4b (mock checkout) is next.
+hackathon requirement #3 met end to end. **M4a is complete** — verified end to end against `docker compose up`, in a
+real browser, with a real conversation. M4b (mock checkout) is next.
 
-**322 automated tests**, of which **313 run with no external setup at all**
-(94 `mcp-services` + 208 `agent-backend` + 11 `frontend`); the remaining 9 need a live LLM key
+**328 automated tests**, of which **319 run with no external setup at all**
+(94 `mcp-services` + 214 `agent-backend` + 11 `frontend`); the remaining 9 need a live LLM key
 and/or a running Phoenix and auto-skip without them. The 202 tests that
 existed on 2026-08-08 have been run green together against a live model and a
-running Phoenix; the 120 added since need no external setup and none is gated.
+running Phoenix. The full live suite was re-run on 2026-08-09 against a
+real model with Phoenix up: **217 passed, 0 skipped**.
 Plus live end-to-end verification against a real Docker Compose build. See
 [`specs/001-ai-car-matchmaker/`](specs/001-ai-car-matchmaker/) for the full
 spec-driven-development trail:

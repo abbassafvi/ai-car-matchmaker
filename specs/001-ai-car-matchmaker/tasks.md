@@ -1096,11 +1096,38 @@ MCP App WebSocket envelope) and D (the browser host) remain.**
       and now the App bridge) are invisible to `auto_instrument`.
 
 **Checkpoint**: User can select a listing and complete a booking form
-without leaving the chat. **Not reached yet.** Phases A+B built the server
-and the form; C1 gave the agent a safe way to open it and a place to put
-the result. What is missing is the wire between them: C2's `mcp_app`
-WebSocket envelope (and its reverse channel for the App's `tools/call`),
-then D's iframe host. Nothing is on a user's screen until D.
+without leaving the chat. ✅ **REACHED (M4a complete, 2026-08-09.)**
+
+Verified against a full `docker compose up --build` — all four services,
+zero manual steps — driven in a real browser and by a real conversation:
+five interview slots in one message, automatic research, a ranked A2UI
+catalogue, a *spoken* selection ("I'll take the Lexus"), the MCP App
+opening by itself, server-side validation rejecting a bad email onto the
+right field without losing anything typed, and a booking reference in both
+the iframe and the chat. Hard requirement #3 is met.
+
+**Phase E's live run found four defects that no test could reach**, all
+fixed and re-verified (HANDOFF §3):
+
+1. 🔴 **A resumed session could not be talked to.** Asked for "the Lexus",
+   the model asked for a listing id — the A2UI catalogue renders from
+   persisted state straight to the browser, so the *model* only knows the
+   slate if narration happened to put it in the message history. Fresh
+   sessions hid it. Fixed by naming the slate in the per-turn phase line.
+2. 🔴 **The click path and the prose path diverged on screen.** A spoken
+   selection recorded state and opened the form, but every card still read
+   "Choose this one" — `_handle_action` re-renders after a click, nothing
+   did after the tool. Invisible to every test, all of which assert state.
+3. 🟠 **Markdown reached the chat bubble again.** Phase F fixed the
+   instance (the narration brief); the *results* prompt had never carried
+   the rule and emitted `**LST-0039 ...**` literally. Now asserted across
+   every prose-emitting phase prompt.
+4. 🟠 **The model offered a test drive, financing, trade-in and delivery.**
+   Nothing was hallucinated in the Principle I sense — and none of it
+   exists.
+
+**Known cosmetic gap**: the App's `autoResize` notification never arrives,
+so the iframe keeps its CSS height and a long form scrolls in its panel.
 
 ---
 

@@ -469,6 +469,48 @@ def test_the_phase_line_is_built_from_state_never_from_prose():
     assert "form open" not in submitted.lower(), "a finished booking is not an open form"
 
 
+def test_the_phase_line_names_the_slate_so_a_resumed_session_can_be_talked_to():
+    """The reason this line exists at all, found live.
+
+    On a resumed session the model has no message history: the catalogue is
+    rendered to the *screen* from persisted state, so the user sees four
+    cars the model has never been told about. Asked for "the Lexus", it
+    asked the user for a listing id -- which spec.md US5 says a resumed
+    session should never need.
+    """
+    from agent.prompts import phase_context_line
+
+    line = phase_context_line({
+        "phase": "RESULTS_READY",
+        "candidate_listings": [
+            {"id": "LST-0035", "year": 2022, "brand": "Jeep", "model": "SUV Sport"},
+            {"id": "LST-0039", "year": 2023, "brand": "Lexus", "model": "SUV Limited"},
+        ],
+    })
+
+    assert "LST-0039" in line and "Lexus" in line, (
+        "the model cannot map a car the user names onto an id it was never given"
+    )
+
+
+def test_the_slate_is_still_named_once_a_car_is_chosen():
+    """FORM_FILLING is reversible ("actually, the Kia"), so the other
+    options have to stay nameable after a selection.
+    """
+    from agent.prompts import phase_context_line
+
+    line = phase_context_line({
+        "phase": "FORM_FILLING", "selected_listing_id": "LST-0035",
+        "candidate_listings": [
+            {"id": "LST-0035", "year": 2022, "brand": "Jeep", "model": "SUV Sport"},
+            {"id": "LST-0039", "year": 2023, "brand": "Lexus", "model": "SUV Limited"},
+        ],
+    })
+
+    assert "Selected listing: LST-0035" in line
+    assert "LST-0039" in line
+
+
 def test_the_phase_line_is_cheap():
     """~20 tokens against DeepAgents' fixed ~2,700-token schema tax. Worth
     pinning: this rides on every single turn, and the project's binding
@@ -480,4 +522,44 @@ def test_the_phase_line_is_cheap():
         "phase": "FORM_FILLING", "selected_listing_id": "LST-0042",
         "booking": {"status": "DRAFT"}, "candidate_listings": [LISTING] * 5,
     })
-    assert len(line) < 160, f"{len(line)} chars is more than a status line needs"
+    # Five listings named, plus the phase and booking state. Roughly 90
+    # tokens against DeepAgents' fixed ~2,700-token schema tax -- and the
+    # slate is what buys a resumed session the ability to be talked to.
+    assert len(line) < 420, f"{len(line)} chars is more than a status line needs"
+
+
+def test_every_user_facing_prompt_forbids_markdown():
+    """The chat bubble renders text literally, so `**bold**` reaches the
+    user with its asterisks.
+
+    Phase F already caught this once, in the research narration, and fixed
+    it only there. Phase E's live run caught it again in the *results*
+    reply ("I've recorded your selection of **LST-0039 ...**"), because the
+    rule had been written into `research.py`'s brief rather than into the
+    prompts. Asserted across all of them so the next surface to grow prose
+    inherits it instead of rediscovering it.
+    """
+    from agent.prompts import PHASE_SYSTEM_PROMPTS
+    from agent.state import Phase
+
+    # INTERVIEWING asks short questions and has never emitted markdown;
+    # CONFIRMED is a dead end. The three that narrate records are the ones
+    # that have actually done it.
+    for phase in (Phase.RESEARCHING, Phase.RESULTS_READY, Phase.FORM_FILLING,
+                  Phase.AWAITING_PAYMENT):
+        prompt = PHASE_SYSTEM_PROMPTS[phase]
+        assert "no markdown" in prompt.lower(), f"{phase} may emit markdown"
+
+
+def test_results_does_not_offer_capabilities_that_do_not_exist():
+    """Also from the live run: after recording a selection the model
+    offered "a test drive, financing, trade-in, delivery". None exist. It
+    is not a Principle I breach -- no value was invented -- but it is a
+    promise the product cannot keep, which is the same lesson in a
+    different currency (§3 lesson 13).
+    """
+    from agent.prompts import RESULTS_SYSTEM_PROMPT
+
+    lowered = RESULTS_SYSTEM_PROMPT.lower()
+    assert "test drive" in lowered and "financing" in lowered
+    assert "booking form opens" in lowered

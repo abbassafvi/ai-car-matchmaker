@@ -482,3 +482,59 @@ async def test_two_clicks_in_a_row_survive_a_real_checkpointer():
     reloaded = await _load_session(agents, config, "two-clicks")
     assert reloaded["selected_listing_id"] == "LST-0001"
     assert reloaded["phase"] == "FORM_FILLING"
+
+
+@pytest.mark.asyncio
+async def test_the_prose_path_re_renders_the_catalogue_like_the_click_path():
+    """Found by having a real conversation, not by any test here.
+
+    Saying "I'll take the Jeep" makes the model call `select_listing`. The
+    state advanced correctly and the booking form opened -- but every
+    catalogue card still read "Choose this one", because `_handle_action`
+    re-renders after a *click* and nothing re-rendered after the *tool*.
+    The two paths agreed on state and disagreed on screen, which is §14
+    finding 5's shape one layer up.
+
+    Invisible to the rest of this file by construction: every other test
+    asserts on `SessionState`, and the state was right. The only way to see
+    it was to look at the page (§3 lesson 9).
+    """
+    from api.main import _SurfaceStream, _refresh_refined_surfaces
+
+    socket = FakeSocket()
+    surfaces = _SurfaceStream(socket)
+
+    before = SessionState.model_validate(results_ready_session().model_dump(mode="json"))
+    after = results_ready_session()
+    after.select_listing("LST-0002")
+
+    await _refresh_refined_surfaces(
+        surfaces,
+        after.model_dump(mode="json"),
+        (before.candidate_ids(), before.selected_listing_id),
+        [],
+    )
+
+    a2ui = socket.of_type("a2ui")
+    assert a2ui, "the catalogue must be re-sent so the chosen card shows as selected"
+    assert "LST-0002" in str(a2ui)
+
+
+@pytest.mark.asyncio
+async def test_an_ordinary_question_turn_does_not_re_send_the_catalogue():
+    """The other half: comparison, not unconditional re-sending. A turn
+    that changes neither the slate nor the selection -- "what's the mileage
+    on the second one?" -- must not re-serialise a whole catalogue.
+    """
+    from api.main import _SurfaceStream, _refresh_refined_surfaces
+
+    socket = FakeSocket()
+    session = results_ready_session()
+    payload = session.model_dump(mode="json")
+
+    await _refresh_refined_surfaces(
+        _SurfaceStream(socket), payload,
+        (session.candidate_ids(), session.selected_listing_id), [],
+    )
+
+    assert socket.sent == []

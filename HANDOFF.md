@@ -39,7 +39,7 @@ and a *mocked* checkout **without leaving the chat**.
 |---|---|---|
 | 1 | Multistep agent: interview → research → ranked+explained recommendations | ✅ interview → auto-research → deterministic ranking + explanations, all surfaced via **A2UI** since Phase D (verified live end to end) |
 | 2 | Interview captures: use case, car type/category, budget, buy-vs-rent, target date | ✅ |
-| 3 | **Form-filling MUST be an MCP App** rendered inside the chat | 🟡 **M4a in progress.** The booking MCP App server and its `ui://` form bundle exist and are verified (Phases A+B); the agent can now open the form for the chosen car, safely, and record the resulting booking (Phase C1, verified live against the running server). **Not yet met**: nothing carries it to the browser — that is C2 (the WS envelope) + D (the iframe host) |
+| 3 | **Form-filling MUST be an MCP App** rendered inside the chat | ✅ **MET (M4a complete, 2026-08-09).** A `ui://` resource in a sandboxed `srcdoc` iframe in the chat column, speaking the MCP Apps protocol via `AppBridge` over the chat WebSocket, pre-filled from the verbatim search record, validated server-side, booking recorded and the phase advanced. Driven in a real browser against `docker compose up`. Previously: 🟡 M4a in progress — The booking MCP App server and its `ui://` form bundle exist and are verified (Phases A+B); the agent can now open the form for the chosen car, safely, and record the resulting booking (Phase C1, verified live against the running server). **Not yet met**: nothing carries it to the browser — that is C2 (the WS envelope) + D (the iframe host) |
 | 4 | **Mock payment/checkout MUST be an MCP App** rendered inside the chat | ⬜ M4b |
 | 5 | Car catalogue + live agent progress (interview state, search status, **reasoning steps**) MUST render via **A2UI** — explicitly *"not static HTML"* | ✅ **satisfied in Phase D (T026)**. Three A2UI surfaces render live: `interview-progress`, `research-reasoning` (per-step trace with icons) and `catalogue` (ranked cards). The `{"type":"progress"}` placeholder is deleted. Verified in a real browser against the real stack |
 | 6 | No real payments, no BMW Group APIs — checkout fully mocked | ✅ by construction |
@@ -103,7 +103,7 @@ M3   ✅ COMPLETE — Research & Ranked Recommendations (User Story 2)
        ✅ Phase F  T029 + T021 live behavioural tests. Both found real
                    defects, all fixed and re-verified live — see §3
        ⬜ (T027 listing-detail MCP App — recommended deferred past M4)
-M4a  🟡 IN PROGRESS — Booking form MCP App (User Story 3)
+M4a  ✅ COMPLETE — Booking form MCP App (User Story 3)
        ✅ Phase A  T033 server half: mcp-services/booking/ + the two-server
                    mount (app.py). Verified live over HTTP and in Docker
        ✅ Phase B  T032: mcp-apps-ui/booking-form/ -> one self-contained
@@ -122,7 +122,9 @@ M4a  🟡 IN PROGRESS — Booking form MCP App (User Story 3)
                    tools/call tunnelled over the chat WebSocket. The form
                    renders pre-filled, rejects, keeps what was typed, and
                    books — driven in a real browser
-       ⬜ Phase E  full-stack verify, docs, push — START HERE (§10)
+       ✅ Phase E  full-stack `docker compose up --build` verify, the live
+                   prompt pass, the measured live sweep (217/0), docs
+M4a  ✅ COMPLETE — hard requirement #3 met end to end
 M4b  ⬜ Mock checkout MCP App (User Story 4)
 M4c  ⬜ Session resume (User Story 5)
 M5   ⬜ Evals (observability itself is wired, M2.5/T051)
@@ -130,7 +132,7 @@ M6   ⬜ Hardening, E2E tests, README finalization
        ⏸️ deck (#13) + demo video (#14) — LAST, and the user's to own
 ```
 
-**Test suite: 322 total** (measured 2026-08-09 after M4a Phase C1, not copied
+**Test suite: 328 total** (measured 2026-08-09 after M4a Phase C1, not copied
 forward — `pytest tests/ -q` in each service).
 
 ⚠️ **The Phase C1 commit message says "278 pass with no external setup". It
@@ -144,26 +146,21 @@ counts with nothing else running.**
 | Suite | Tests | Gated | Files |
 |---|---|---|---|
 | `mcp-services` | **94** | 0 | `test_generate_listings` (8), `test_marketplace` (22), `test_marketplace_server` (9), `test_booking` (**26**), `test_booking_server` (**28**) |
-| `agent-backend` | **217** | 9 | 24 modules, see §7 |
+| `agent-backend` | **223** | 9 | 24 modules, see §7 |
 | `frontend` | **11** | 0 | `src/mcp-app-host/csp.test.ts` — vitest, `npm test` |
 
-- **313 pass with no external setup** (94 + 208 + 11)
-- ⚠️ **The live sweep has NOT been re-run since 2026-08-08.** On that date
-  all 202 then-existing tests passed together with a live key and Phoenix
-  running (`agent-backend` **163 passed, 0 skipped**, `mcp-services` 39),
-  costing **19 Groq requests** for 9 gated tests / ~20 model turns. Every
-  test added since (the 82 across M4a Phases A, B and C1) needs **no**
-  external setup and none is gated, so the live figure should now be
-  **193/0** — but that is an inference, not a measurement. Re-run before
-  claiming it.
-  ⚠️ Also unmeasured live: **Phase C1 changed three prompts** (a new
-  `FORM_FILLING_SYSTEM_PROMPT`, a `refine_search` instruction in
-  RESULTS_READY, and `TRANSACTION_SYSTEM_PROMPT` narrowed to checkout).
-  Their *content* is unit-tested; their *effect on a model* is not. §3
-  lesson 14 is that prompt defects are usually about ordering and are
-  invisible until a real turn runs, so budget a live pass in C2/D.
-  A quota 429 **skips** rather than failing (§8.32), so a constrained
-  re-run still reads honestly.
+- **319 pass with no external setup** (94 + 214 + 11)
+- ✅ **The live sweep was re-run on 2026-08-09 and is green.**
+  `agent-backend` **217 passed, 0 skipped** against Groq with Phoenix
+  running — measured, not inferred, closing a caveat that had stood since
+  2026-08-08. Six ungated tests have been added since that run, so the
+  figure to expect now is **223/0**; that increment is an inference, the
+  217 is not.
+- ✅ **The three prompts M4a changed have now met a model** (Phase E), and
+  the run found four real defects — see §3's Phase E block. Re-verified
+  after fixing: the results reply is plain prose, names no capability that
+  does not exist, and FORM_FILLING points at the form instead of asking
+  for contact details.
 - Exactly **9** gated tests, up from 3: the six new Phase F live tests join
   `test_interview_agent`, `test_chat_endpoint` (need `LLM_API_KEY`) and
   `test_otel_setup` (needs Phoenix). Do **not** count them by grepping
@@ -401,6 +398,35 @@ undone it — `resolve_registry` resolves extras **over** the local registry
 have overwritten the wrapper. Same name, same phase, same green suite. A
 remediation earns the same scepticism as the thing it remediates.
 
+### Found by Phase E's live run — by talking to it
+
+**The first end-to-end conversation through the finished stack.** Four
+defects, none reachable from any test, and three of them only visible on a
+screen.
+
+| Was believed | Reality found |
+|---|---|
+| The model can act on what the user can see | **Not on a resumed session.** Asked for "the Lexus", it replied asking for the listing id. The A2UI catalogue renders from persisted state *straight to the browser* — the model only ever learns the slate from its own message history, and a resumed session has none. Worked on a fresh session purely because the research turn had narrated the cars into context. spec.md US5 says a resumed session continues where it left off; being asked to quote an id is not that. Fixed by naming the slate in the per-turn phase line, which is what finally earns that line its tokens |
+| Phase C1 made the click path and the prose path converge | **They converged on state and diverged on screen.** "I'll take the Jeep" recorded the selection and opened the form, but every catalogue card still read "Choose this one" — `_handle_action` re-renders after a *click* and nothing re-rendered after the *tool*. Invisible to every test in `test_select_listing.py`, because they all assert on `SessionState`, and the state was right |
+| Phase F fixed the markdown-in-the-chat-bubble defect | It fixed the **instance**, not the **class**. The rule went into `research.py`'s narration brief; the *results* prompt had never carried it, and emitted `**LST-0039 – the 2023 Lexus SUV (Limited)**` with the asterisks on screen. Now asserted across every prose-emitting phase prompt |
+| A grounded reply is a safe reply | After recording a selection the model offered "a test drive, financing, trade-in, delivery". Not one value was invented, so Principle I held perfectly — and every one of those is a promise the product cannot keep. §3 lesson 13 in a new currency |
+
+**Sixteenth lesson: the model cannot see the screen.** Every surface in this
+project renders from persisted state directly to the browser, which is
+exactly what Principle I wants — and it means the UI and the model have
+*different* views of the session. Anything the user can point at ("the
+Lexus", "the second one", "that price") has to be in the model's context on
+purpose. A fresh session hides this, because narration happens to put it
+there; a resumed one exposes it immediately. **Test conversational features
+on a resumed session, not only a fresh one.**
+
+**Seventeenth lesson: fix the class, not the instance.** The markdown rule
+was written into the one brief where the defect appeared and nowhere else,
+so the next surface to grow prose reproduced it two milestones later. When
+a fix is a rule, ask which other places the rule applies to and assert it
+across all of them — `test_every_user_facing_prompt_forbids_markdown` now
+does.
+
 **Lessons worth keeping:**
 0. **Unwired code is unaudited code.** A milestone that lands a server, a
    schema or a bundle *before* anything calls it gets a full green suite
@@ -627,7 +653,7 @@ docker compose up --build
 # Tests (run the FULL suite together, never file-by-file — see §8.31)
 source .venv/bin/activate
 (cd mcp-services  && python -m pytest tests/ -q)   # 94 pass, no setup needed
-(cd agent-backend && python -m pytest tests/ -q)   # 208 pass, 9 skip (no key)
+(cd agent-backend && python -m pytest tests/ -q)   # 214 pass, 9 skip (no key)
 (cd frontend      && npm test)                     # 11 pass (vitest)
 # Bare `pytest tests/` also works now. It did NOT before the Phase C
 # audit -- both suites died at collection, and only `python -m pytest`
@@ -637,7 +663,7 @@ source .venv/bin/activate
 # With live LLM (see §5) and Phoenix:
 docker compose up -d phoenix
 set -a && . agent-backend/.env && set +a
-(cd agent-backend && python -m pytest tests/ -q)   # expect 217 pass, 0 skip
+(cd agent-backend && python -m pytest tests/ -q)   # expect 223 pass, 0 skip
                                                    # (INFERRED: last measured
                                                    #  2026-08-08 at 163/0; the
                                                    #  82 tests added since are
@@ -1042,7 +1068,7 @@ Full text in `.specify/memory/constitution.md`.
 
 ---
 
-## 10. NEXT UP: M4a — start here
+## 10. NEXT UP: M4b — start here (M4a is complete)
 
 ### What Phase F left you
 
@@ -1110,37 +1136,61 @@ enforced; an iframe claiming `LST-9999` books the session's car anyway; a
 non-allowlisted tool is refused; and a reconnect after submitting does
 **not** reopen the form.
 
-### Immediate next: M4a **Phase D** — the browser host
+### What Phase D shipped (2026-08-09)
 
-Everything below the browser is done. What is missing is
-`frontend/src/mcp-app-host/`, which is currently an empty directory.
+`frontend/src/mcp-app-host/` — `AppBridge` over a `srcdoc` iframe in the
+chat column, the App's `tools/call` tunnelled over the chat WebSocket, and
+the server's CSP applied by the host. Full record, including the three
+findings that cost time (the host API is on the `/app-bridge` subpath;
+`buildAllowAttribute` exists but no CSP builder does; host style variable
+names are a fixed enum), is in **tasks.md T034**. `csp.test.ts` is the
+repo's first frontend test — `npm test` in `frontend/`.
 
-1. **Render the iframe in the chat column** (decided 2026-08-08), `srcdoc`
-   from `resource.html`, `sandbox="allow-scripts"` and **no**
-   `allow-same-origin` — the opaque origin is why the bundle had to be
-   self-contained. Apply `resource.meta.ui.csp` rather than inventing a
-   policy; it is on the wire now precisely so the host does not have to.
-2. **`new AppBridge(null, hostInfo, caps)`** and set `bridge.oncalltool` to
-   forward as `{"type":"app_tool_call", call_id, name, arguments}` and
-   resolve on the matching `app_tool_result`. `AppBridge` takes a **null**
-   MCP client and `oncalltool` is a **public setter** — verified by reading
-   the 1.7.5 bundle; that is what lets the host intercept instead of
-   needing an MCP client in the browser.
-3. **Order matters**: `oninitialized` → `sendToolInput(envelope.toolInput)`
-   → `sendToolResult(envelope.toolResult)`. ext-apps states the input
-   notification is required before the result; skip it and the View waits
-   forever with an empty form.
-4. Then **click the actual form** (§3 lesson 9), and re-run the live prompt
-   pass the three C1 prompts still owe (§2).
+### What Phase E verified (2026-08-09) — M4a is complete
 
-**Phase D** is then `frontend/src/mcp-app-host/`: a `srcdoc` iframe with
-`sandbox="allow-scripts"` (no `allow-same-origin`), `new AppBridge(null,
-hostInfo, caps)`, and `bridge.oncalltool` tunnelling the App's
-`submit_booking` over the existing WebSocket. **`AppBridge` accepts a `null`
-MCP client and `oncalltool` is a public setter** — verified by reading the
-1.7.5 bundle; that is what lets the host intercept the call instead of
-needing an MCP client in the browser. Then **click the actual form**
-(§3 lesson 9).
+Full `docker compose up --build`, all four services, then driven in a real
+browser and by a real conversation.
+
+| Checked | Result |
+|---|---|
+| Four services from one command, zero manual steps (SC-004) | `agent-backend` ok / `mcp_connected` / `booking_connected`, `mcp-services` 203 listings + booking bundle present, frontend 200, Phoenix 200 |
+| The whole booking flow against the **containers** (production nginx bundle, not the dev server) | catalogue → click → MCP App iframe with the right sandbox and host-applied CSP → submit → booking |
+| The C2 wire against Docker | 17/17, same as natively |
+| **The live test sweep** | **`agent-backend` 217 passed, 0 skipped** on Groq — measured, closing a caveat open since 2026-08-08 |
+| **The three prompts that had never met a model** | Run live; found four defects (§3), fixed, re-verified |
+| A full conversation: 5 slots in one message → auto-research → ranked catalogue → prose selection → form opens → FORM_FILLING reply | Works. Narration grounded and markdown-free; "four SUVs that match your criteria" true (nothing relaxed) |
+| Principle V in the full stack | Phoenix holds LLM spans (`ChatOpenAI`), tool spans (`search_listings`) and 310 `phase.transition` spans |
+
+**Known cosmetic gap, unchanged:** the App's `autoResize` notification never
+arrives, so the booking iframe keeps its CSS height and a long form scrolls
+inside its panel. The handshake demonstrably completes.
+
+### Immediate next: **M4b** — the mock checkout MCP App
+
+M4a is done, so the pattern is now established rather than speculative.
+M4b should be markedly cheaper: `mcp-services/payment/` mounts at
+`/payment/mcp` beside the other two (`app.py::compose` already takes a
+list), `mcp-apps-ui/checkout/` builds the same self-contained way, and the
+frontend host is **already generic** — it renders whatever `mcp_app`
+envelope arrives, so a second App needs no new frontend code beyond
+deciding where it sits.
+
+Read before starting:
+
+1. **§12b and the M4a phases in §10** — the shape to copy, including the
+   two traps that cost time (`transport_security`, and keeping raw MCP
+   tools out of `extra_tools`).
+2. **Principle III is the point of M4b**, and unlike M4a it is not
+   satisfied by construction: `confirm_mock_payment` will handle card-like
+   input. `booking/store.py::normalise`'s allowlist is the pattern —
+   discard at the boundary, before validation and before persistence, and
+   assert it in a test that submits a card number.
+3. `SessionState.confirm_payment()` is the **sixth** transition
+   (AWAITING_PAYMENT → CONFIRMED). It goes beside the other five and gets
+   a span for free.
+4. The App bridge's allowlist in `_handle_app_tool_call` is currently
+   `submit_booking` in FORM_FILLING only. M4b adds a second entry; keep it
+   a table rather than growing an `if`.
 
 ### Still owed on M3, small but real
 

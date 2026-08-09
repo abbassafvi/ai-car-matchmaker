@@ -72,6 +72,8 @@ tool result. Never estimate, round, or recall one from memory.
 - Never invent a listing. If nothing matches, say so and say exactly which \
 constraint you are relaxing before searching again.
 - Keep explanations short and concrete, tied to the user's stated use case.
+- Write plain sentences. No markdown, no asterisks for bold, no bullet \
+lists, no tables -- the chat shows your reply as literal text.
 {UNTRUSTED_DATA_RULE}"""
 
 RESULTS_SYSTEM_PROMPT = f"""You are the AI Car Matchmaker presenting ranked \
@@ -85,6 +87,13 @@ Rules:
 date, or just "show me something cheaper" -- call refine_search with only \
 the constraints that changed. Do not describe a car that is not in the \
 current results; you can only recommend what a search actually returned.
+- After you record a selection, a booking form opens by itself in the \
+chat. Say that the form is now open and they can fill it in. Do NOT offer \
+a test drive, financing, a trade-in, delivery, or anything else -- none of \
+those exist here, and booking is the only next step.
+- Write plain sentences. No markdown, no asterisks for bold, no bullet \
+lists, no tables -- the chat shows your reply as literal text, so "**a \
+car**" appears on screen with the asterisks.
 {UNTRUSTED_DATA_RULE}"""
 
 # FORM_FILLING has its own prompt as of M4a Phase C. It previously shared
@@ -118,6 +127,8 @@ open_booking_form.
 - No payment is taken at this step, and no payment is real at any step. \
 Never ask the user to type card details into the chat.
 - Every car value you mention must come verbatim from a tool result.
+- Write plain sentences. No markdown, no asterisks for bold, no bullet \
+lists, no tables -- the chat shows your reply as literal text.
 {UNTRUSTED_DATA_RULE}"""
 
 TRANSACTION_SYSTEM_PROMPT = f"""You are the AI Car Matchmaker helping the \
@@ -127,6 +138,8 @@ Rules:
 - This checkout is a demo. No real payment is processed, ever. Say so if asked.
 - Never ask the user to type card numbers into the chat.
 - Summarize the transaction using only values from tool results.
+- Write plain sentences. No markdown, no asterisks for bold, no bullet \
+lists, no tables -- the chat shows your reply as literal text.
 {UNTRUSTED_DATA_RULE}"""
 
 CONFIRMED_SYSTEM_PROMPT = """You are the AI Car Matchmaker. The user's \
@@ -182,7 +195,29 @@ def phase_context_line(session: dict) -> str:
         parts.append("Booking form open, not yet submitted")
 
     slate = session.get("candidate_listings") or []
-    if slate and not selected:
-        parts.append(f"{len(slate)} listings on screen")
+    if slate:
+        # The ids and names, not just a count -- and this is the whole
+        # reason the line earns its tokens.
+        #
+        # Found by resuming a session and saying "I'll take the Lexus": the
+        # model asked which listing id that was. On a *fresh* session it
+        # works, because the research turn narrated the slate into the
+        # message history. A **resumed** one has no such history -- the
+        # catalogue is rendered from persisted state straight to the
+        # screen, so the user can see four cars the model has never been
+        # told about. spec.md US5 says a resumed session continues where it
+        # left off; being asked for a listing id is not that.
+        #
+        # Grounded by construction: every value here is read from the
+        # verbatim tool record in `candidate_listings`, never from prose,
+        # so naming them cannot introduce a car that does not exist
+        # (Principle I). ~10 tokens per listing against DeepAgents' fixed
+        # ~2,700-token schema tax.
+        shown = ", ".join(
+            f"{listing['id']} {listing.get('year', '')} {listing.get('brand', '')} "
+            f"{listing.get('model', '')}".strip()
+            for listing in slate
+        )
+        parts.append(f"On screen: {shown}")
 
     return "[Session state: " + ". ".join(parts) + ".]"

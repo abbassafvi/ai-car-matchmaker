@@ -285,10 +285,30 @@ def _refine_artifact(messages) -> dict | None:
 
 
 async def _refresh_refined_surfaces(
-    surfaces: _SurfaceStream, session: dict, previous_slate: list[str], messages
+    surfaces: _SurfaceStream, session: dict, before: tuple[list[str], str | None], messages
 ) -> None:
-    """Re-render the catalogue and reasoning trace after a refined search."""
-    if [listing["id"] for listing in session.get("candidate_listings") or []] == previous_slate:
+    """Re-render the catalogue (and reasoning trace) after a model turn.
+
+    Two different things a model turn can change need this, and only the
+    first was handled originally:
+
+    - **`refine_search` replaced the slate.** The old cards are for cars
+      that are no longer selectable, so clicking one would be rejected --
+      the "agent looks broken" path.
+    - **`select_listing` chose a car.** Found by running a real
+      conversation: saying "I'll take the Jeep" recorded the selection and
+      opened the booking form, but every card still read "Choose this one",
+      because `_handle_action` re-renders after a *click* and nothing did
+      after the tool. The two paths converged on state and diverged on
+      screen -- §14 finding 5's shape, one layer up, and invisible to every
+      test because they all assert on state.
+
+    Compared rather than always re-sent, so an ordinary question turn does
+    not re-serialise the catalogue.
+    """
+    previous_slate, previous_selection = before
+    slate = [listing["id"] for listing in session.get("candidate_listings") or []]
+    if slate == previous_slate and session.get("selected_listing_id") == previous_selection:
         return
 
     refined = _refine_artifact(messages)
@@ -897,7 +917,10 @@ async def chat_ws(websocket: WebSocket, session_id: str):
                 })
                 continue
 
-            previous_slate = [listing["id"] for listing in session.get("candidate_listings") or []]
+            before = (
+                [listing["id"] for listing in session.get("candidate_listings") or []],
+                session.get("selected_listing_id"),
+            )
             session = result["session"]
 
             await websocket.send_json({
@@ -917,7 +940,7 @@ async def chat_ws(websocket: WebSocket, session_id: str):
             # "agent looks broken" path this whole fix exists to remove.
             # Compared rather than always re-sent so an ordinary question
             # turn does not re-serialise the catalogue.
-            await _refresh_refined_surfaces(surfaces, session, previous_slate, result["messages"])
+            await _refresh_refined_surfaces(surfaces, session, before, result["messages"])
 
             # One inbound message can now produce several outbound ones: the
             # interview reply above, then a reasoning trace, a catalogue and
